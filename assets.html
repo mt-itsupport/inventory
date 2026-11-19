@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Math Talent - ระบบครุภัณฑ์</title>
+  <base target="_top">
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: 'Prompt', sans-serif; background-color: #f1f5f9; }
+    .slide-over { transition: transform 0.3s ease; }
+    .slide-over.open { transform: translateX(0); }
+    .slide-over.close { transform: translateX(100%); }
+    .category-chip { font-size: 0.75rem; padding: 4px 12px; border-radius: 9999px; font-weight: 500; white-space: nowrap; }
+    .chip-active { background-color: #1e40af; color: white; }
+    .asset-card { transition: all 0.2s ease; }
+    .asset-card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+    .barcode-item { border: 1px dashed #cbd5e1 !important; border-radius: 0 !important; padding: 4px; margin: 0; text-align: center; }
+    #print-area { overflow-x: auto; max-width: 100%; }
+    #print-list-area {
+  display: none;
+}
+    @media print {
+  body * { visibility: hidden; }
+  
+  /* พิมพ์บาร์โค้ด */
+  #print-area, #print-area * { visibility: visible; }
+  #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+
+  /* พิมพ์รายการ */
+  #print-list-area, #print-list-area * { visibility: visible; }
+  #print-list-area { position: absolute; left: 0; top: 0; width: 100%; display: block !important; }
+
+  /* ซ่อน modal และส่วนอื่น */
+  #print-modal, #print-list-modal, #action-bar, .slide-over, #scanner-overlay, #camera-overlay {
+    display: none !important;
+  }
+}
+    .status-chip { font-size: 0.7rem; padding: 2px 8px; border-radius: 9999px; font-weight: 500; white-space: nowrap; }
+  </style>
+</head>
+<body class="p-3 sm:p-6 min-h-screen flex justify-center items-start">
+
+  <!-- Global Loading Line -->
+  <div id="global-loading-line" style="position: fixed; top:0; left:0; width:100%; height:3px; z-index:9999; display:none; pointer-events:none;">
+    <div id="global-loading-progress" style="width:0%; height:100%; background: linear-gradient(90deg, #1e40af, #22c55e); transition: width 0.3s ease;"></div>
+  </div>
+
+  <div class="max-w-7xl w-full bg-white rounded-2xl shadow-xl p-4 sm:p-8 border border-slate-200">
+
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-6 mb-6 border-b border-slate-200 gap-4">
+      <div class="flex items-center gap-4">
+        <div class="w-14 h-14 rounded-full border-2 border-blue-700 p-0.5 bg-white shadow-md flex-shrink-0 overflow-hidden">
+          <img src="https://mathtalentschool.com/th/wp-content/uploads/2023/06/Math-Small-300x300.png" alt="Logo" class="w-full h-full object-cover rounded-full" />
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-bold text-blue-950 leading-tight">Math Talent</h1>
+          <p class="text-xs sm:text-sm text-slate-500 font-medium">ระบบครุภัณฑ์ (Asset Management)</p>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="goToPage('index')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+          <i class="fa-solid fa-arrow-left mr-1"></i> กลับ Admin
+        </button>
+        <button onclick="goToPage('orders')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+          <i class="fa-solid fa-store mr-1"></i> ระบบสั่งซื้อ
+        </button>
+      </div>
+    </header>
+
+    <!-- Stats Cards -->
+    <div id="stats-section" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <p class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">ทรัพย์สินรวม</p>
+        <h3 class="text-4xl font-black text-slate-800" id="stat-total-items">0</h3>
+      </div>
+      <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <p class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">มูลค่ารวม</p>
+        <div class="flex items-baseline gap-1">
+          <span class="text-xl font-bold text-blue-600">฿</span>
+          <h3 class="text-4xl font-black text-blue-600" id="stat-total-value">0</h3>
+        </div>
+      </div>
+    </div>
+
+    <!-- Category Chips & Location Chips & Toolbar -->
+    <div class="flex flex-col gap-4 mb-6">
+      <div class="flex gap-2 overflow-x-auto pb-2 whitespace-nowrap" id="category-chips"></div>
+      <div class="flex gap-2 overflow-x-auto pb-2 whitespace-nowrap" id="location-chips"></div>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div class="flex-1 w-full sm:max-w-xs flex gap-2">
+          <div class="relative flex-1">
+            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+            <input type="text" id="search-input" placeholder="ค้นหารหัส/ชื่อ..." class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm">
+          </div>
+          <button onclick="startScanner('search')" class="bg-slate-100 text-slate-600 px-4 rounded-xl hover:bg-slate-200" title="สแกนค้นหา"><i class="fa-solid fa-qrcode"></i></button>
+        </div>
+        <div class="flex gap-2 ml-auto">
+          <button id="select-mode-btn" onclick="toggleSelectMode()" class="px-4 py-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold text-sm">
+            <i class="fa-solid fa-check-double mr-1"></i> เลือก
+          </button>
+          <button id="view-toggle-btn" onclick="toggleView()" class="p-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200" title="สลับมุมมอง">
+            <i data-lucide="table-properties" class="w-5 h-5"></i>
+          </button>
+          <button onclick="toggleStats()" class="p-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200" title="แสดง/ซ่อนสถิติ">
+            <i class="fa-solid fa-eye-slash"></i>
+          </button>
+          <button onclick="openAssetForm()" class="bg-blue-900 hover:bg-blue-800 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all">
+            <i class="fa-solid fa-plus"></i> เพิ่มครุภัณฑ์
+          </button>
+          <button onclick="document.getElementById('asset-import-input').click()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-file-excel"></i> นำเข้า Excel
+          </button>
+          <input id="asset-import-input" type="file" accept=".xlsx,.xls" class="hidden" onchange="importAssetsFromExcel(event)">
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Bar (Selection Mode) -->
+    <div id="action-bar" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 flex items-center justify-between">
+      <span class="text-sm font-semibold text-blue-800"><span id="selected-count">0</span> รายการที่เลือก</span>
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="printSelectedAssets()" class="bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-800"><i class="fa-solid fa-print mr-1"></i> พิมพ์บาร์โค้ด</button>
+        <button onclick="openPrintListModal()" class="bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-800"><i class="fa-solid fa-file-lines mr-1"></i> พิมพ์รายการ</button> 
+        <button onclick="downloadSelectedAssetsImages()" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700"><i class="fa-solid fa-download mr-1"></i> ดาวน์โหลดภาพ</button>
+        <button onclick="deleteSelectedAssets()" class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-600"><i class="fa-solid fa-trash mr-1"></i> ลบ</button>
+      </div>
+    </div>
+
+    <!-- Table View -->
+    <div id="table-view" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead class="bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th id="th-checkbox" class="px-4 py-4 w-12 hidden"><input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)"></th>
+              <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">รหัสครุภัณฑ์</th>
+              <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">ชื่อ</th>
+              <th id="th-category" class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">หมวดหมู่</th>
+              <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">จำนวน</th>
+              <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">สถานะ</th>
+              <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">ราคารวม</th>
+              <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="assets-tbody" class="divide-y divide-slate-50">
+            <tr><td colspan="8" class="text-center py-10 text-slate-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>กำลังโหลด...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex items-center justify-between px-6 py-4 border-t border-slate-100">
+        <span class="text-sm text-slate-500" id="pagination-info"></span>
+        <div class="flex gap-2" id="pagination-buttons"></div>
+      </div>
+    </div>
+
+    <!-- Gallery View -->
+    <div id="gallery-view" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+  </div>
+
+  <!-- Asset Form Slide-over -->
+  <div id="asset-form-overlay" class="fixed inset-0 z-50 overflow-hidden pointer-events-none">
+    <div id="form-backdrop" class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity duration-300 opacity-0" onclick="closeAssetForm()"></div>
+    <div id="asset-form-slideover" class="absolute inset-y-0 right-0 max-w-full flex slide-over close">
+      <div class="w-screen max-w-md md:max-w-lg bg-white shadow-2xl flex flex-col h-full">
+        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+          <h2 class="text-lg font-black text-slate-800" id="form-title">เพิ่มครุภัณฑ์ใหม่</h2>
+          <button onclick="closeAssetForm()" class="p-2 hover:bg-slate-50 rounded-full"><i class="fa-solid fa-xmark text-slate-400"></i></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+          <form id="asset-form" onsubmit="handleAssetFormSubmit(event)">
+            <div class="space-y-4">
+              <div>
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">ชื่อรายการ</label>
+                <input type="text" id="form-name" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" required>
+              </div>
+              <div>
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">หมวดหมู่</label>
+                <div class="flex gap-2 items-center">
+                  <select id="form-category" class="flex-1 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" required onchange="onCategoryChange()"></select>
+                  <button type="button" onclick="openCategoryModal()" class="bg-slate-100 p-2.5 rounded-xl text-slate-600 hover:bg-slate-200"><i class="fa-solid fa-plus"></i></button>
+                  <button type="button" onclick="openCategoryModal(true)" class="bg-slate-100 p-2.5 rounded-xl text-slate-600 hover:bg-slate-200"><i class="fa-solid fa-pen"></i></button>
+                </div>
+              </div>
+              <div>
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">รหัสครุภัณฑ์</label>
+                <input type="text" id="form-asset-code" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-mono font-bold text-blue-700" readonly>
+              </div>
+              <div class="hidden">
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">รหัสสินค้า (Product Code)</label>
+                <div class="flex gap-2">
+                  <input type="text" id="form-product-code" class="flex-1 p-3 bg-white border border-slate-200 rounded-xl text-sm font-mono">
+                  <button type="button" onclick="startScanner('product')" class="bg-slate-100 text-slate-600 px-4 rounded-xl hover:bg-slate-200"><i class="fa-solid fa-qrcode"></i></button>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">ราคา</label>
+                  <input type="number" id="form-price" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" min="0">
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">จำนวน</label>
+                  <input type="number" id="form-quantity" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" min="1" value="1">
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">หน่วยนับ</label>
+                  <input type="text" id="form-unit" value="ชิ้น" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">ผู้รับผิดชอบ</label>
+                  <input type="text" id="form-responsible" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+              </div>
+              <div>
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">สถานที่เก็บ</label>
+                <input type="text" id="form-location" list="form-location-list" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="พิมพ์หรือเลือกสถานที่...">
+                <datalist id="form-location-list"></datalist>
+              </div>
+              <div>
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">หมายเหตุ</label>
+                <textarea id="form-note" rows="3" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">วันที่ได้มา</label>
+                  <input type="date" id="form-date" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">สถานะ</label>
+                  <select id="form-status" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="ใช้งานได้">ใช้งานได้</option>
+                    <option value="ยืม/สำรอง">ยืม/สำรอง</option>
+                    <option value="รอซ่อม">รอซ่อม</option>
+                    <option value="เสีย">เสีย</option>
+                    <option value="เลิกใช้งาน">เลิกใช้งาน</option>
+                  </select>
+                </div>
+              </div>
+              <div class="hidden">
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">การรับประกัน</label>
+                <div class="flex items-center gap-2">
+                  <input type="checkbox" id="form-warranty-toggle" class="w-4 h-4 accent-blue-600" onchange="toggleWarrantyInputs()">
+                  <span class="text-sm">มีประกัน</span>
+                </div>
+                <div id="warranty-inputs" class="hidden mt-3 space-y-2">
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="text-xs text-slate-500">เริ่มประกัน</label>
+                      <input type="date" id="form-warranty-start" class="w-full p-2 border border-slate-200 rounded-lg text-sm" onchange="updateWarrantySummary()">
+                    </div>
+                    <div>
+                      <label class="text-xs text-slate-500">หมดประกัน</label>
+                      <input type="date" id="form-warranty-end" class="w-full p-2 border border-slate-200 rounded-lg text-sm" onchange="updateWarrantySummary()">
+                    </div>
+                  </div>
+                  <div class="text-xs text-slate-500" id="warranty-summary"></div>
+                </div>
+              </div>
+              <div class="hidden">
+                <label class="text-xs font-bold text-slate-500 uppercase mb-1.5 block">รูปภาพ</label>
+                <div class="flex flex-col items-center gap-3">
+                  <div id="image-preview" class="w-full h-48 bg-white border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center overflow-hidden">
+                    <i class="fa-solid fa-image text-slate-300 text-4xl"></i>
+                    <p class="text-xs text-slate-400 mt-2">ยังไม่มีรูปภาพ</p>
+                  </div>
+                  <div class="flex gap-2 w-full">
+                    <button type="button" onclick="startCamera()" class="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-blue-700"><i class="fa-solid fa-camera"></i> ถ่ายรูป</button>
+                    <button type="button" onclick="document.getElementById('file-input').click()" class="flex-1 bg-white border border-slate-200 text-slate-600 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-slate-50"><i class="fa-solid fa-upload"></i> เลือกไฟล์</button>
+                    <input type="file" id="file-input" accept="image/png,image/jpeg,image/jpg" class="hidden" onchange="handleFileSelect(event)">
+                  </div>
+                </div>
+              </div>
+              <input type="hidden" id="form-asset-id" value="">
+            </div>
+          </form>
+        </div>
+        <div class="p-6 border-t border-slate-100 bg-white">
+          <button onclick="handleAssetFormSubmit(event)" class="w-full py-4 rounded-xl font-bold shadow-lg bg-blue-900 text-white hover:bg-blue-800 transition-all flex items-center justify-center gap-2">
+            <i class="fa-solid fa-save mr-1"></i> บันทึกข้อมูล
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category Modal -->
+  <div id="category-modal" class="fixed inset-0 z-[70] bg-black/40 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full shadow-xl p-6">
+      <h3 class="text-lg font-bold text-blue-950 mb-4" id="category-modal-title">เพิ่มหมวดหมู่</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs font-bold text-slate-500 block mb-1">ชื่อหมวดหมู่</label>
+          <input type="text" id="cat-name-input" class="w-full p-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-500 block mb-1">Prefix (ตัวอักษรภาษาอังกฤษ)</label>
+          <input type="text" id="cat-prefix-input" class="w-full p-2 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500" placeholder="เช่น M, C, S">
+        </div>
+      </div>
+      <div class="flex gap-2 justify-end mt-6">
+        <button onclick="closeCategoryModal()" class="px-4 py-2 bg-slate-200 rounded-lg text-sm font-semibold">ยกเลิก</button>
+        <button onclick="saveCategory()" class="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-bold">บันทึก</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detail-modal" class="fixed inset-0 z-50 bg-black/40 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-white z-10 flex justify-between items-center p-4 border-b">
+        <h3 class="text-lg font-bold text-blue-950">รายละเอียดครุภัณฑ์</h3>
+        <button onclick="closeDetailModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+      <div id="detail-content" class="p-6"></div>
+    </div>
+  </div>
+
+     <!-- Print Barcode Modal -->
+<div id="print-modal" class="fixed inset-0 z-[80] bg-black/60 hidden flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-2xl w-full shadow-xl max-h-[90vh] overflow-y-auto">
+    <div class="sticky top-0 bg-white z-10 flex justify-between items-center p-4 border-b">
+      <h3 class="text-lg font-bold text-blue-950">พิมพ์บาร์โค้ดครุภัณฑ์</h3>
+      <button onclick="closePrintModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+    </div>
+    <div class="p-6">
+      <div class="flex flex-wrap gap-4 mb-4">
+        <div>
+          <label class="text-xs font-bold text-slate-500 block mb-1">ขนาดฉลาก</label>
+          <select id="print-size" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" onchange="renderPrintPreview()">
+            <option value="S">S (8 คอลัมน์)</option>
+            <option value="M" selected>M (7 คอลัมน์)</option>
+            <option value="L">L (6 คอลัมน์)</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-500 block mb-1">จำนวนชุดต่อรายการ</label>
+          <input type="number" id="print-copies" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" value="1" min="1" onchange="renderPrintPreview()">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-500 block mb-1">ขนาดกระดาษ</label>
+          <select id="print-paper" class="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <option value="A4" selected>A4</option>
+            <option value="Letter">Letter</option>
+          </select>
+        </div>
+      </div>
+      <div id="print-area" class="grid gap-2 p-2 border border-slate-200 rounded-xl"></div>
+    </div>
+    <div class="p-4 border-t flex justify-end gap-2">
+      <button onclick="closePrintModal()" class="px-4 py-2 bg-slate-200 rounded-lg text-sm font-semibold">ยกเลิก</button>
+      <button onclick="window.print()" class="px-6 py-2 bg-blue-700 text-white rounded-lg text-sm font-bold"><i class="fa-solid fa-print mr-1"></i> พิมพ์</button>
+    </div>
+  </div>
+</div>
+
+<!-- Print List Options Modal -->
+<div id="print-list-modal" class="fixed inset-0 z-[85] bg-black/60 hidden flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl p-6">
+    <h3 class="text-lg font-bold text-blue-950 mb-4"><i class="fa-solid fa-file-lines mr-2"></i>ตัวเลือกการพิมพ์รายการ</h3>
+
+    <!-- เลือกคอลัมน์ที่ต้องการแสดง -->
+    <div class="space-y-2 mb-4">
+      <p class="text-sm font-semibold text-slate-700">คอลัมน์ที่แสดง</p>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="opt-category" checked class="accent-blue-600"> หมวดหมู่</label>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="opt-quantity" checked class="accent-blue-600"> จำนวน</label>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="opt-status" checked class="accent-blue-600"> สถานะ</label>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="opt-price" checked class="accent-blue-600"> ราคา</label>
+    </div>
+
+    <!-- เลือกมุมมอง -->
+    <div class="mb-4">
+      <p class="text-sm font-semibold text-slate-700 mb-2">มุมมองพิมพ์</p>
+      <div class="flex gap-4">
+        <label class="flex items-center gap-2 text-sm"><input type="radio" name="print-view" value="table" checked class="accent-blue-600"> Table</label>
+        <label class="flex items-center gap-2 text-sm"><input type="radio" name="print-view" value="gallery" class="accent-blue-600"> Gallery</label>
+      </div>
+    </div>
+
+    <div class="flex gap-2 justify-end">
+      <button onclick="closePrintListModal()" class="px-4 py-2 bg-slate-200 rounded-lg text-sm font-semibold">ยกเลิก</button>
+      <button onclick="printAssetList()" class="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-bold"><i class="fa-solid fa-print mr-1"></i> พิมพ์</button>
+    </div>
+  </div>
+</div>
+
+<div id="print-list-area" style="display: none;"></div>
+
+  <!-- Scanner Overlay -->
+  <div id="scanner-overlay" class="fixed inset-0 z-[60] bg-black hidden flex flex-col items-center justify-center p-6">
+    <div class="w-full max-w-sm rounded-2xl overflow-hidden bg-white relative">
+      <div id="scanner-reader"></div>
+    </div>
+    <button onclick="stopScanner()" class="mt-8 bg-white/20 text-white px-8 py-3 rounded-full font-bold backdrop-blur-md">ยกเลิก</button>
+  </div>
+
+  <!-- Camera Overlay -->
+  <div id="camera-overlay" class="fixed inset-0 z-[60] bg-black hidden flex flex-col items-center justify-center p-4">
+    <div class="w-full max-w-sm rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800">
+      <video id="camera-video" autoplay playsinline class="w-full aspect-square object-cover"></video>
+    </div>
+    <div class="flex gap-4 mt-8">
+      <button onclick="stopCamera()" class="bg-white/10 text-white px-6 py-3 rounded-full font-bold">ยกเลิก</button>
+      <button onclick="capturePhoto()" class="bg-blue-600 text-white px-10 py-3 rounded-full font-bold shadow-xl flex items-center gap-2"><i class="fa-solid fa-camera"></i> ถ่ายเลย</button>
+    </div>
+  </div>
+
+  <script>
+    // ==================== CONFIG ====================
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzXjs8H2jIG7bveswFma7mV5AurF_4EWSWHVkpHQOAKIo2iP5-_VwI0hXqnVPj82hoC/exec';
+    let currentTab = 'table';
+    let allAssets = [];
+    let allCategories = [];
+    let selectedAssets = new Set();
+    let selectMode = false;
+    let currentCategoryFilter = '';
+    let currentLocationFilter = '';
+    let allLocations = [];
+    let currentPage = 1;
+    const pageSize = 20;
+    let selectedImageData = '';
+    let scannerInstance = null;
+    let cameraStream = null;
+    let loadingCount = 0;
+
+    // ==================== NAVIGATION ====================
+    function goToPage(page) {
+      if (page === 'index') window.location.href = 'index.html';
+      else if (page === 'orders') window.open(GAS_API_URL, '_blank', 'noopener');
+    }
+
+    // ==================== GLOBAL LOADING ====================
+    function showLoading() {
+      loadingCount++;
+      const bar = document.getElementById('global-loading-line');
+      const progress = document.getElementById('global-loading-progress');
+      if (!bar || !progress) return;
+      bar.style.display = 'block';
+      progress.style.width = '0%';
+      requestAnimationFrame(() => { progress.style.width = '90%'; });
+    }
+
+    function hideLoading() {
+      loadingCount = Math.max(0, loadingCount - 1);
+      if (loadingCount > 0) return;
+      const bar = document.getElementById('global-loading-line');
+      const progress = document.getElementById('global-loading-progress');
+      if (!bar || !progress) return;
+      progress.style.width = '100%';
+      setTimeout(() => {
+        bar.style.display = 'none';
+        progress.style.width = '0%';
+      }, 200);
+    }
+
+    // ==================== API HELPERS ====================
+    async function apiGet(action) {
+      showLoading();
+      try {
+        // ใช้ POST เช่นเดียวกับหน้า Admin เพื่อหลีกเลี่ยง redirect ของ GAS
+        // ที่ทำให้ fetch จากไฟล์หรือ GitHub ถูกตัดเป็น Failed to fetch
+        const res = await fetch(GAS_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action })
+        });
+        const data = await res.json();
+        if (data && data.success === false) throw new Error(data.message || 'Error');
+        return data;
+      } finally { hideLoading(); }
+    }
+
+    async function apiPost(action, payload = {}) {
+      showLoading();
+      try {
+        const res = await fetch(GAS_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action, ...payload })
+        });
+        const data = await res.json();
+        if (data && data.success === false) throw new Error(data.message || 'Error');
+        return data;
+      } finally { hideLoading(); }
+    }
+
+    function normalizeImportHeader(value) {
+      return String(value || '').trim().toLowerCase().replace(/[\s()/._-]/g, '');
+    }
+
+    function importAssetsFromExcel(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async function(loadEvent) {
+        try {
+          const workbook = XLSX.read(loadEvent.target.result, { type: 'array', cellDates: true });
+          const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '', raw: false });
+          const valueOf = (row, names) => {
+            const key = Object.keys(row).find(k => names.includes(normalizeImportHeader(k)));
+            return key ? row[key] : '';
+          };
+          const assets = rows.map(row => ({
+            date: valueOf(row, ['วันที่รับเข้า', 'วันที่ได้มา']),
+            assetCode: valueOf(row, ['รหัสครุภัณฑ์']),
+            name: valueOf(row, ['รายการชื่ออุปกรณ์', 'ชื่อรายการ', 'ชื่อ']),
+            category: valueOf(row, ['หมวดหมู่ประเภท', 'หมวดหมู่']),
+            quantity: valueOf(row, ['จำนวน']),
+            unit: valueOf(row, ['หน่วยนับ']) || 'ชิ้น',
+            price: valueOf(row, ['ราคาต่อหน่วยบาท', 'ราคาต่อหน่วย', 'ราคา']),
+            location: valueOf(row, ['สถานที่จัดเก็บแผนก', 'สถานที่เก็บ', 'สถานที่']),
+            responsible: valueOf(row, ['ผู้รับผิดชอบ']),
+            status: valueOf(row, ['สถานะการใช้งาน', 'สถานะ']) || 'ใช้งานได้',
+            note: valueOf(row, ['หมายเหตุ'])
+          })).filter(a => a.assetCode || a.name);
+          if (!assets.length) throw new Error('ไม่พบข้อมูล กรุณาตรวจหัวตารางในไฟล์ Excel');
+          if (!confirm(`นำเข้าครุภัณฑ์ ${assets.length} รายการลงชีทหรือไม่?`)) return;
+          const result = await apiPost('importAssets', { assets });
+          await loadAssets();
+          alert(`นำเข้าสำเร็จ ${result.imported} รายการ`);
+        } catch (error) {
+          alert('นำเข้า Excel ไม่สำเร็จ: ' + error.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // ==================== LOAD DATA ====================
+    async function loadAssets() {
+      try {
+        allAssets = await apiGet('getAssets');
+        populateLocationUI();
+        renderAll();
+      } catch (e) {
+        alert('โหลดข้อมูลครุภัณฑ์ไม่สำเร็จ: ' + e.message);
+      }
+    }
+
+    async function loadCategories() {
+      try {
+        allCategories = await apiGet('getAssetCategoryList');
+        populateCategoryUI();
+      } catch (e) {
+        console.warn('โหลดหมวดหมู่ไม่สำเร็จ', e);
+        allCategories = [];
+        populateCategoryUI();
+      }
+    }
+
+    function populateCategoryUI() {
+      const chipsContainer = document.getElementById('category-chips');
+      chipsContainer.innerHTML = '<button class="category-chip chip-active" data-category="" onclick="filterCategory(this)">ทั้งหมด</button>';
+      allCategories.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.className = 'category-chip bg-slate-100 text-slate-600';
+        btn.dataset.category = cat.name;
+        btn.textContent = cat.name;
+        btn.onclick = function() { filterCategory(this); };
+        chipsContainer.appendChild(btn);
+      });
+
+      const formCat = document.getElementById('form-category');
+      formCat.innerHTML = '';
+      allCategories.forEach(cat => {
+        const opt = document.createElement('option');
+        opt.value = cat.name;
+        opt.textContent = cat.name;
+        formCat.appendChild(opt);
+      });
+    }
+
+    function populateLocationUI() {
+      const locSet = new Set(allAssets.map(a => (a.location || '').trim()).filter(Boolean));
+      allLocations = [...locSet].sort();
+
+      const chipsContainer = document.getElementById('location-chips');
+      chipsContainer.innerHTML = '<button class="category-chip chip-active" data-location="" onclick="filterLocation(this)">ทั้งหมด</button>';
+      allLocations.forEach(loc => {
+        const btn = document.createElement('button');
+        btn.className = 'category-chip bg-slate-100 text-slate-600';
+        btn.dataset.location = loc;
+        btn.textContent = loc;
+        btn.onclick = function() { filterLocation(this); };
+        chipsContainer.appendChild(btn);
+      });
+
+      const datalist = document.getElementById('form-location-list');
+      datalist.innerHTML = '';
+      allLocations.forEach(loc => {
+        const opt = document.createElement('option');
+        opt.value = loc;
+        datalist.appendChild(opt);
+      });
+    }
+
+    function filterCategory(btn) {
+      currentCategoryFilter = btn.dataset.category || '';
+      document.querySelectorAll('#category-chips .category-chip').forEach(chip => {
+        if (chip === btn) chip.className = 'category-chip chip-active';
+        else chip.className = 'category-chip bg-slate-100 text-slate-600';
+      });
+      currentPage = 1;
+      renderAll();
+    }
+
+    function filterLocation(btn) {
+      currentLocationFilter = btn.dataset.location || '';
+      document.querySelectorAll('#location-chips .category-chip').forEach(chip => {
+        if (chip === btn) chip.className = 'category-chip chip-active';
+        else chip.className = 'category-chip bg-slate-100 text-slate-600';
+      });
+      currentPage = 1;
+      renderAll();
+    }
+
+    // ==================== RENDER ====================
+    function renderAll() {
+      renderStats();
+      renderTable();
+      renderGallery();
+    }
+
+    function renderStats() {
+      document.getElementById('stat-total-items').textContent = allAssets.length;
+      const totalValue = allAssets.reduce((sum, a) => sum + Number(a.totalPrice || (a.price * a.quantity) || 0), 0);
+      document.getElementById('stat-total-value').textContent = totalValue.toLocaleString();
+    }
+
+    function getFilteredAssets() {
+      const searchTerm = document.getElementById('search-input').value.trim().toLowerCase();
+      return allAssets.filter(a => {
+        const matchSearch = !searchTerm ||
+          (a.assetCode || '').toLowerCase().includes(searchTerm) ||
+          (a.name || '').toLowerCase().includes(searchTerm) ||
+          (a.productCode || '').toLowerCase().includes(searchTerm);
+        const matchCategory = !currentCategoryFilter || a.category === currentCategoryFilter;
+        const matchLocation = !currentLocationFilter || a.location === currentLocationFilter;
+        return matchSearch && matchCategory && matchLocation;
+      });
+    }
+
+    function renderTable() {
+      const filtered = getFilteredAssets();
+      const totalPages = Math.ceil(filtered.length / pageSize);
+      if (currentPage > totalPages) currentPage = totalPages || 1;
+      const start = (currentPage - 1) * pageSize;
+      const pageData = filtered.slice(start, start + pageSize);
+
+      const tbody = document.getElementById('assets-tbody');
+      if (pageData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-10 text-slate-400">ไม่พบข้อมูล</td></tr>';
+      } else {
+        tbody.innerHTML = pageData.map(asset => {
+          const statusColor = getStatusColor(asset.status);
+          const categoryChip = `<span class="category-chip ${getCategoryColor(asset.category)}">${asset.category || '-'}</span>`;
+          return `<tr class="table-row border-b border-slate-50" data-code="${asset.assetCode}" onclick="if (!selectMode) openDetailModal('${asset.assetCode}')">
+            <td class="px-4 py-4 w-12 ${selectMode ? '' : 'hidden'}"><input type="checkbox" class="row-checkbox" data-code="${asset.assetCode}" ${selectedAssets.has(asset.assetCode) ? 'checked' : ''} onclick="event.stopPropagation(); toggleCheckbox(this)"></td>
+            <td class="px-6 py-4 font-mono font-bold text-blue-700 text-sm">${asset.assetCode || '-'}</td>
+            <td class="px-6 py-4 font-medium text-slate-800 text-sm">${asset.name || '-'}</td>
+            <td class="px-6 py-4">${currentCategoryFilter === '' ? categoryChip : ''}</td>
+            <td class="px-6 py-4 text-slate-600 text-sm">${asset.quantity || 1}</td>
+            <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColor}">${asset.status || 'ใช้งานได้'}</span></td>
+            <td class="px-6 py-4 text-right text-sm font-bold text-slate-800">฿${Number(asset.totalPrice || (asset.price * asset.quantity) || 0).toLocaleString()}</td>
+            <td class="px-6 py-4 text-center">
+              <button onclick="event.stopPropagation(); openAssetForm('${asset.assetCode}')" class="text-slate-400 hover:text-blue-600 p-2"><i class="fa-solid fa-edit"></i></button>
+            </td>
+          </tr>`;
+        }).join('');
+      }
+
+      document.getElementById('pagination-info').textContent = `แสดง ${start + 1}–${Math.min(start + pageData.length, filtered.length)} จาก ${filtered.length} รายการ`;
+      renderPaginationButtons(totalPages);
+
+      const thCategory = document.getElementById('th-category');
+      thCategory.classList.toggle('hidden', currentCategoryFilter !== '');
+      const thCheckbox = document.getElementById('th-checkbox');
+      thCheckbox.classList.toggle('hidden', !selectMode);
+      document.querySelectorAll('.row-checkbox').forEach(cb => cb.classList.toggle('hidden', !selectMode));
+    }
+
+    function renderGallery() {
+      const gallery = document.getElementById('gallery-view');
+      const filtered = getFilteredAssets();
+      const start = (currentPage - 1) * pageSize;
+      const pageData = filtered.slice(start, start + pageSize);
+
+      if (pageData.length === 0) {
+        gallery.innerHTML = '<div class="col-span-full text-center py-10 text-slate-400">ไม่พบข้อมูล</div>';
+      } else {
+        gallery.innerHTML = pageData.map(asset => {
+          const statusColor = getStatusColor(asset.status);
+          const img = asset.image ? `<img src="${getDirectImageUrl(asset.image)}" class="w-full h-40 object-contain rounded-t-xl bg-slate-50">` :
+            '<div class="w-full h-40 bg-slate-100 flex items-center justify-center rounded-t-xl"><i class="fa-solid fa-image text-slate-300 text-3xl"></i></div>';
+
+          // เพิ่ม checkbox ถ้า selectMode
+          const checkbox = selectMode ? `
+            <input type="checkbox" class="asset-checkbox absolute top-2 right-2 w-4 h-4 z-10 accent-blue-600" data-code="${asset.assetCode}" ${selectedAssets.has(asset.assetCode) ? 'checked' : ''} onclick="event.stopPropagation(); toggleCheckbox(this)" />
+          ` : '';
+
+          return `<div class="asset-card bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm relative">
+            <div class="relative">
+              <div class="cursor-pointer" onclick="openDetailModal('${asset.assetCode}')">${img}</div>
+              ${checkbox}
+            </div>
+            <div class="p-3">
+              <div class="flex justify-between items-start">
+                <h3 class="font-bold text-slate-800 text-sm">${asset.name}</h3>
+                <button onclick="openAssetForm('${asset.assetCode}')" class="text-slate-400 hover:text-blue-600"><i class="fa-solid fa-edit"></i></button>
+              </div>
+              <p class="text-xs font-mono text-blue-700">${asset.assetCode}</p>
+              <div class="flex justify-between items-center mt-2 text-xs text-slate-600">
+                <span>จำนวน: <b>${asset.quantity || 1}</b></span>
+                <span>฿${Number(asset.price || 0).toLocaleString()}</span>
+              </div>
+              <span class="inline-block mt-2 px-2 py-1 rounded-full text-xs font-semibold ${statusColor}">${asset.status}</span>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
+
+    function renderPaginationButtons(totalPages) {
+      const container = document.getElementById('pagination-buttons');
+      container.innerHTML = '';
+      if (totalPages <= 1) return;
+      for (let i = 1; i <= totalPages; i++) {
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        btn.className = `px-3 py-1 rounded-lg text-sm font-semibold ${i === currentPage ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`;
+        btn.onclick = () => { currentPage = i; renderAll(); };
+        container.appendChild(btn);
+      }
+    }
+
+    function getStatusColor(status) {
+      switch (status) {
+        case 'ใช้งานได้': return 'bg-emerald-100 text-emerald-700';
+        case 'ยืม/สำรอง': return 'bg-blue-100 text-blue-700';
+        case 'รอซ่อม': return 'bg-yellow-100 text-yellow-700';
+        case 'เสีย': return 'bg-orange-100 text-orange-700';
+        case 'เลิกใช้งาน': return 'bg-slate-200 text-slate-600';
+        default: return 'bg-slate-100 text-slate-600';
+      }
+    }
+
+    const categoryColorMap = {
+      'สื่อคณิตศาสตร์': 'bg-blue-100 text-blue-700',
+      'สื่อวิทยาศาสตร์': 'bg-rose-100 text-rose-700',
+      'อุปกรณ์คอมพิวเตอร์-ไอที': 'bg-purple-100 text-purple-700',
+      'เบ็ดเตล็ด': 'bg-gray-100 text-gray-700',
+      'After School': 'bg-amber-100 text-amber-700',
+      'ออกบูธ': 'bg-green-100 text-green-700'
+    };
+
+    function getCategoryColor(category) {
+      if (categoryColorMap[category]) return categoryColorMap[category];
+      const fallbackColors = [
+        'bg-blue-100 text-blue-700', 'bg-green-100 text-green-700',
+        'bg-purple-100 text-purple-700', 'bg-amber-100 text-amber-700',
+        'bg-rose-100 text-rose-700', 'bg-indigo-100 text-indigo-700',
+        'bg-cyan-100 text-cyan-700', 'bg-lime-100 text-lime-700',
+        'bg-gray-100 text-gray-700'
+      ];
+      const idx = (category?.charCodeAt(0) || 0) % fallbackColors.length;
+      return fallbackColors[idx];
+    }
+
+    // ==================== SELECTION MODE ====================
+    function toggleSelectMode() {
+      selectMode = !selectMode;
+      if (!selectMode) selectedAssets.clear();
+      document.getElementById('select-mode-btn').classList.toggle('bg-slate-200', selectMode);
+      document.getElementById('action-bar').classList.toggle('hidden', !selectMode || selectedAssets.size === 0);
+      updateSelectedCount();
+      renderAll();
+    }
+
+    function toggleCheckbox(checkbox) {
+      const code = checkbox.dataset.code;
+      if (checkbox.checked) selectedAssets.add(code);
+      else selectedAssets.delete(code);
+      updateSelectedCount();
+    }
+
+    function toggleSelectAll(master) {
+      const filtered = getFilteredAssets();
+      const start = (currentPage - 1) * pageSize;
+      const pageData = filtered.slice(start, start + pageSize);
+      document.querySelectorAll('.row-checkbox').forEach(cb => {
+        cb.checked = master.checked;
+        if (master.checked) selectedAssets.add(cb.dataset.code);
+        else selectedAssets.delete(cb.dataset.code);
+      });
+      updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+      document.getElementById('selected-count').textContent = selectedAssets.size;
+      document.getElementById('action-bar').classList.toggle('hidden', selectedAssets.size === 0);
+    }
+
+    function printSelectedAssets() {
+      const selected = allAssets.filter(a => selectedAssets.has(a.assetCode));
+      if (selected.length === 0) return;
+      openPrintModal(selected);
+    }
+    // ==================== PRINT LIST ====================
+const PRINT_LIST_STORAGE_KEY = 'print_list_options_assets';
+
+function getDefaultPrintListOptions() {
+  return {
+    showCategory: true,
+    showQuantity: true,
+    showStatus: true,
+    showPrice: true,
+    viewMode: 'table'
+  };
+}
+
+function loadPrintListOptions() {
+  try {
+    const raw = localStorage.getItem(PRINT_LIST_STORAGE_KEY);
+    if (raw) return { ...getDefaultPrintListOptions(), ...JSON.parse(raw) };
+  } catch (e) {}
+  return getDefaultPrintListOptions();
+}
+
+function savePrintListOptions() {
+  const options = {
+    showCategory: document.getElementById('opt-category').checked,
+    showQuantity: document.getElementById('opt-quantity').checked,
+    showStatus: document.getElementById('opt-status').checked,
+    showPrice: document.getElementById('opt-price').checked,
+    viewMode: document.querySelector('input[name="print-view"]:checked')?.value || 'table'
+  };
+  localStorage.setItem(PRINT_LIST_STORAGE_KEY, JSON.stringify(options));
+}
+
+function openPrintListModal() {
+  const selected = allAssets.filter(a => selectedAssets.has(a.assetCode));
+  if (selected.length === 0) {
+    alert('กรุณาเลือกรายการก่อนพิมพ์');
+    return;
+  }
+
+  // โหลดค่าที่จำไว้
+  const opt = loadPrintListOptions();
+  document.getElementById('opt-category').checked = opt.showCategory;
+  document.getElementById('opt-quantity').checked = opt.showQuantity;
+  document.getElementById('opt-status').checked = opt.showStatus;
+  document.getElementById('opt-price').checked = opt.showPrice;
+  const radio = document.querySelector(`input[name="print-view"][value="${opt.viewMode}"]`);
+  if (radio) radio.checked = true;
+
+  document.getElementById('print-list-modal').classList.remove('hidden');
+}
+
+function closePrintListModal() {
+  document.getElementById('print-list-modal').classList.add('hidden');
+}
+
+function printAssetList() {
+  savePrintListOptions();
+
+  const selected = allAssets.filter(a => selectedAssets.has(a.assetCode));
+  if (!selected.length) {
+    closePrintListModal();
+    alert('ไม่มีรายการที่เลือก');
+    return;
+  }
+
+  const options = loadPrintListOptions();
+  const printArea = document.getElementById('print-list-area');
+  const barcodeArea = document.getElementById('print-area');
+
+  // เตรียมพื้นที่พิมพ์รายการ
+  printArea.style.display = 'block';
+  barcodeArea.style.display = 'none';  // ซ่อนบาร์โค้ด
+
+  let html = '';
+
+  if (options.viewMode === 'table') {
+    // ---------- มุมมอง Table ----------
+    let headerCells = '<th>รหัสครุภัณฑ์</th><th>ชื่อรายการ</th>';
+    if (options.showCategory) headerCells += '<th>หมวดหมู่</th>';
+    if (options.showQuantity) headerCells += '<th>จำนวน</th>';
+    if (options.showStatus) headerCells += '<th>สถานะ</th>';
+    if (options.showPrice) headerCells += '<th>ราคา</th>';
+
+    html = `
+      <table style="width:100%; border-collapse: collapse; font-family: 'Prompt', sans-serif; font-size: 12px;">
+        <thead>
+          <tr style="background: #f1f5f9; color: #0f172a;">
+            ${headerCells}
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    selected.forEach(asset => {
+      let row = `
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace; color: #1e40af;">${asset.assetCode}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 500;">${asset.name}</td>
+      `;
+      if (options.showCategory) row += `<td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${asset.category || '-'}</td>`;
+      if (options.showQuantity) row += `<td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: center;">${asset.quantity || 1}</td>`;
+      if (options.showStatus) row += `<td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${asset.status || '-'}</td>`;
+      if (options.showPrice) row += `<td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${Number(asset.price || 0).toLocaleString()} ฿</td>`;
+      html += `<tr>${row}</tr>`;
+    });
+
+    html += `
+        </tbody>
+      </table>
+    `;
+  } else {
+    // ---------- มุมมอง Gallery ----------
+    html = `
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-family: 'Prompt', sans-serif;">
+    `;
+
+    selected.forEach(asset => {
+      const imageHtml = asset.image
+        ? `<img src="${asset.image}" style="width: 100%; height: 100px; object-fit: contain; border-radius: 6px; background: #f8fafc;" />`
+        : `<div style="width: 100%; height: 100px; background: #f8fafc; border-radius: 6px; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-image" style="font-size: 24px; color: #94a3b8;"></i></div>`;
+
+      let card = `
+        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+          ${imageHtml}
+          <div style="font-weight: bold; margin-top: 6px; font-size: 13px;">${asset.name}</div>
+          <div style="font-family: monospace; color: #1e40af; font-size: 12px; margin-top: 2px;">${asset.assetCode}</div>
+      `;
+
+      if (options.showCategory) card += `<div style="font-size: 11px; color: #475569; margin-top: 2px;">หมวดหมู่: ${asset.category || '-'}</div>`;
+      if (options.showQuantity) card += `<div style="font-size: 11px; color: #475569; margin-top: 2px;">จำนวน: ${asset.quantity || 1}</div>`;
+      if (options.showStatus) card += `<div style="font-size: 11px; color: #475569; margin-top: 2px;">สถานะ: ${asset.status || '-'}</div>`;
+      if (options.showPrice) card += `<div style="font-size: 11px; font-weight: bold; color: #0f172a; margin-top: 2px;">ราคา: ${Number(asset.price || 0).toLocaleString()} ฿</div>`;
+
+      card += `</div>`;
+      html += card;
+    });
+
+    html += `</div>`;
+  }
+
+  printArea.innerHTML = html;
+
+  closePrintListModal();
+
+  // หน่วงเวลาเพื่อให้ DOM อัปเดต แล้วสั่งพิมพ์
+  setTimeout(() => {
+    window.print();
+
+    // หลังพิมพ์เสร็จ ให้คืนค่าการแสดงผลเดิม
+    setTimeout(() => {
+      printArea.style.display = 'none';
+      barcodeArea.style.display = 'grid'; // กลับเป็น grid เหมือนเดิม
+    }, 500);
+  }, 200);
+}
+
+    async function deleteSelectedAssets() {
+      if (selectedAssets.size === 0) return;
+      if (!confirm('ต้องการลบรายการที่เลือกทั้งหมด?')) return;
+      try {
+        await apiPost('deleteAssets', { assetCodes: Array.from(selectedAssets) });
+        selectedAssets.clear();
+        await loadAssets();
+      } catch (e) {
+        alert('ลบไม่สำเร็จ: ' + e.message);
+      }
+    }
+
+    async function downloadSelectedAssetsImages() {
+      const selected = allAssets.filter(a => selectedAssets.has(a.assetCode) && a.image);
+      if (selected.length === 0) { showToast('ไม่มีรูปภาพในรายการที่เลือก', false); return; }
+      for (let i = 0; i < selected.length; i++) {
+        await downloadAssetImage(selected[i]);
+        if (i < selected.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    function showToast(message, isSuccess = true) {
+      const toast = document.createElement('div');
+      toast.textContent = message;
+      toast.className = `fixed bottom-4 right-4 px-4 py-2 rounded-lg text-white text-sm font-semibold ${isSuccess ? 'bg-emerald-600' : 'bg-red-600'} z-[100]`;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 2000);
+    }
+
+    // ==================== FORM HANDLING ====================
+    function openAssetForm(assetCode) {
+      resetForm();
+      document.getElementById('asset-form-overlay').classList.remove('pointer-events-none');
+      document.getElementById('form-backdrop').classList.remove('opacity-0');
+      document.getElementById('asset-form-slideover').classList.remove('close');
+      document.getElementById('asset-form-slideover').classList.add('open');
+      document.getElementById('form-title').textContent = assetCode ? 'แก้ไขข้อมูล' : 'เพิ่มครุภัณฑ์ใหม่';
+
+      if (assetCode) {
+        const asset = allAssets.find(a => a.assetCode === assetCode);
+        if (asset) {
+          document.getElementById('form-asset-id').value = asset.assetCode;
+          document.getElementById('form-category').value = asset.category || '';
+          document.getElementById('form-asset-code').value = asset.assetCode || '';
+          document.getElementById('form-product-code').value = asset.productCode || '';
+          document.getElementById('form-name').value = asset.name || '';
+          document.getElementById('form-price').value = asset.price || '';
+          document.getElementById('form-quantity').value = asset.quantity || 1;
+          document.getElementById('form-unit').value = asset.unit || 'ชิ้น';
+          document.getElementById('form-location').value = asset.location || '';
+          document.getElementById('form-responsible').value = asset.responsible || '';
+          document.getElementById('form-note').value = asset.note || '';
+          document.getElementById('form-date').value = asset.date || '';
+          document.getElementById('form-status').value = asset.status || 'ใช้งานได้';
+          document.getElementById('form-warranty-toggle').checked = asset.hasWarranty === 'true' || asset.hasWarranty === true;
+          toggleWarrantyInputs();
+          if (asset.warrantyStart) document.getElementById('form-warranty-start').value = asset.warrantyStart;
+          if (asset.warrantyEnd) document.getElementById('form-warranty-end').value = asset.warrantyEnd;
+          updateWarrantySummary();
+          if (asset.image) {
+            selectedImageData = asset.image;
+            document.getElementById('image-preview').innerHTML = `<img src="${getDirectImageUrl(asset.image)}" class="w-full h-full object-contain">`;
+          }
+        }
+      } else {
+        generateAssetCode();
+      }
+    }
+
+    function onCategoryChange() {
+      if (!document.getElementById('form-asset-id').value) generateAssetCode();
+    }
+
+    function getPrefixForCategory(category) {
+      const cat = allCategories.find(c => c.name === category);
+      return cat ? cat.prefix : 'X';
+    }
+
+    function generateAssetCode() {
+      const category = document.getElementById('form-category').value;
+      const prefix = getPrefixForCategory(category);
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(-2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const datePart = yy + mm + dd;
+      let randomPart = '';
+      let isUnique = false;
+      let attempts = 0;
+      while (!isUnique && attempts < 100) {
+        randomPart = String(Math.floor(1000 + Math.random() * 9000));
+        const fullCode = prefix + '-' + datePart + randomPart;
+        isUnique = !allAssets.some(a => a.assetCode === fullCode);
+        attempts++;
+      }
+      document.getElementById('form-asset-code').value = prefix + '-' + datePart + randomPart;
+    }
+
+    function closeAssetForm() {
+      document.getElementById('asset-form-overlay').classList.add('pointer-events-none');
+      document.getElementById('form-backdrop').classList.add('opacity-0');
+      document.getElementById('asset-form-slideover').classList.remove('open');
+      document.getElementById('asset-form-slideover').classList.add('close');
+      resetForm();
+    }
+
+    function resetForm() {
+      document.getElementById('asset-form').reset();
+      document.getElementById('form-asset-id').value = '';
+      document.getElementById('form-asset-code').value = '';
+      document.getElementById('form-quantity').value = 1;
+      document.getElementById('image-preview').innerHTML = '<i class="fa-solid fa-image text-slate-300 text-4xl"></i><p class="text-xs text-slate-400 mt-2">ยังไม่มีรูปภาพ</p>';
+      selectedImageData = '';
+      document.getElementById('form-warranty-toggle').checked = false;
+      toggleWarrantyInputs();
+    }
+
+    function toggleWarrantyInputs() {
+      const checked = document.getElementById('form-warranty-toggle').checked;
+      document.getElementById('warranty-inputs').classList.toggle('hidden', !checked);
+      if (!checked) {
+        document.getElementById('form-warranty-start').value = '';
+        document.getElementById('form-warranty-end').value = '';
+        document.getElementById('warranty-summary').textContent = '';
+      }
+    }
+
+    function updateWarrantySummary() {
+      const start = document.getElementById('form-warranty-start').value;
+      const end = document.getElementById('form-warranty-end').value;
+      if (start && end) {
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        const diffMs = endDate - startDate;
+        if (diffMs < 0) {
+          document.getElementById('warranty-summary').textContent = 'วันที่สิ้นสุดก่อนวันเริ่มต้น';
+          return;
+        }
+        const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        const totalYears = Math.floor(totalDays / 365);
+        const totalMonths = Math.floor((totalDays % 365) / 30);
+        const totalRemainingDays = totalDays % 30;
+
+        const today = new Date();
+        const remainingMs = endDate - today;
+        const remainingDays = Math.max(0, Math.floor(remainingMs / (1000 * 60 * 60 * 24)));
+        const remYears = Math.floor(remainingDays / 365);
+        const remMonths = Math.floor((remainingDays % 365) / 30);
+        const remDays = remainingDays % 30;
+
+        const totalText = `${totalYears} ปี ${totalMonths} เดือน ${totalRemainingDays} วัน`;
+        const remText = remainingDays <= 0 ? 'หมดอายุแล้ว' : `${remYears} ปี ${remMonths} เดือน ${remDays} วัน`;
+        document.getElementById('warranty-summary').textContent = `ระยะเวลาทั้งหมด: ${totalText} (${totalDays} วัน) | คงเหลือ: ${remText} (${remainingDays} วัน)`;
+      }
+    }
+
+    async function handleAssetFormSubmit(e) {
+  e.preventDefault();
+  const assetData = {
+    assetCode: document.getElementById('form-asset-code').value,
+    productCode: document.getElementById('form-product-code').value,
+    name: document.getElementById('form-name').value,
+    category: document.getElementById('form-category').value,
+    price: document.getElementById('form-price').value,
+    quantity: document.getElementById('form-quantity').value,
+    unit: document.getElementById('form-unit').value,
+    location: document.getElementById('form-location').value,
+    responsible: document.getElementById('form-responsible').value,
+    note: document.getElementById('form-note').value,
+    date: document.getElementById('form-date').value,
+    status: document.getElementById('form-status').value,
+    hasWarranty: document.getElementById('form-warranty-toggle').checked ? 'true' : 'false',
+    warrantyStart: document.getElementById('form-warranty-start').value,
+    warrantyEnd: document.getElementById('form-warranty-end').value,
+    image: selectedImageData
+  };
+
+  const formAction = document.getElementById('form-asset-id').value ? 'update' : 'create';
+
+  // ถ้าเป็นการแก้ไขและมี URL เดิม ให้ส่งไปด้วยเพื่อให้ Backend ลบไฟล์เก่า
+  if (formAction === 'update') {
+    const originalAsset = allAssets.find(a => a.assetCode === assetData.assetCode);
+    if (originalAsset && originalAsset.image) {
+      assetData.oldImageUrl = originalAsset.image;
+    }
+  }
+
+  try {
+    await apiPost('submitAsset', { formAction, assetData });
+    closeAssetForm();
+    await loadAssets();
+  } catch (e) {
+    alert('บันทึกไม่สำเร็จ: ' + e.message);
+  }
+
+    }
+
+    // ==================== CATEGORY MODAL ====================
+    function openCategoryModal(isEdit = false) {
+      const currentCategory = document.getElementById('form-category').value;
+      const cat = allCategories.find(c => c.name === currentCategory);
+      document.getElementById('category-modal-title').textContent = isEdit ? 'แก้ไขหมวดหมู่' : 'เพิ่มหมวดหมู่';
+      document.getElementById('cat-name-input').value = isEdit && cat ? cat.name : '';
+      document.getElementById('cat-prefix-input').value = isEdit && cat ? cat.prefix : '';
+      document.getElementById('category-modal').classList.remove('hidden');
+      document.getElementById('category-modal').dataset.edit = isEdit ? 'true' : 'false';
+    }
+
+    function closeCategoryModal() {
+      document.getElementById('category-modal').classList.add('hidden');
+    }
+
+    async function saveCategory() {
+      const name = document.getElementById('cat-name-input').value.trim();
+      const prefix = document.getElementById('cat-prefix-input').value.trim().toUpperCase();
+      if (!name || !prefix) return alert('กรุณากรอกชื่อและ Prefix');
+      const isEdit = document.getElementById('category-modal').dataset.edit === 'true';
+      const categoryAction = isEdit ? 'update' : 'create';
+      try {
+        await apiPost('submitCategory', {
+          categoryAction,
+          categoryData: { name, prefix, oldName: isEdit ? document.getElementById('form-category').value : '' }
+        });
+        closeCategoryModal();
+        await loadCategories();
+        document.getElementById('form-category').value = name;
+        if (!document.getElementById('form-asset-id').value) generateAssetCode();
+      } catch (e) {
+        alert('บันทึกหมวดหมู่ไม่สำเร็จ: ' + e.message);
+      }
+    }
+
+    // ==================== DETAIL MODAL ====================
+    function openDetailModal(assetCode) {
+      const asset = allAssets.find(a => a.assetCode === assetCode);
+      if (!asset) return;
+
+      let warrantyHtml = '';
+      if (asset.hasWarranty === 'true' || asset.hasWarranty === true) {
+        const start = asset.warrantyStart ? new Date(asset.warrantyStart) : null;
+        const end = asset.warrantyEnd ? new Date(asset.warrantyEnd) : null;
+        if (start && end && end >= start) {
+          const totalDays = Math.floor((end - start) / (1000 * 60 * 60 * 24));
+          const y = Math.floor(totalDays / 365);
+          const m = Math.floor((totalDays % 365) / 30);
+          const d = totalDays % 30;
+          const remMs = end - new Date();
+          const remDays = Math.max(0, Math.floor(remMs / (1000 * 60 * 60 * 24)));
+          const ry = Math.floor(remDays / 365);
+          const rm = Math.floor((remDays % 365) / 30);
+          const rd = remDays % 30;
+          warrantyHtml = `<p class="text-sm"><strong>ประกัน:</strong> ${asset.warrantyStart || '-'} ถึง ${asset.warrantyEnd || '-'} (ทั้งหมด ${y} ปี ${m} เดือน ${d} วัน / ${totalDays} วัน) ${remDays > 0 ? `คงเหลือ ${ry} ปี ${rm} เดือน ${rd} วัน / ${remDays} วัน` : 'หมดอายุแล้ว'}</p>`;
+        } else {
+          warrantyHtml = `<p class="text-sm"><strong>ประกัน:</strong> ${asset.warrantyStart || '-'} ถึง ${asset.warrantyEnd || '-'}</p>`;
+        }
+      } else {
+        warrantyHtml = '<p class="text-sm"><strong>ประกัน:</strong> ไม่มี</p>';
+      }
+
+      const img = asset.image ? `<img src="${getDirectImageUrl(asset.image)}" class="w-20 h-20 object-contain rounded-lg border">` :
+        '<div class="w-20 h-20 bg-slate-100 flex items-center justify-center rounded-lg"><i class="fa-solid fa-image text-3xl text-slate-300"></i></div>';
+
+      const html = `
+        <div class="space-y-3">
+          <div class="flex items-center gap-4">
+            ${img}
+            <div>
+              <p class="text-xs font-mono text-blue-700">${asset.assetCode}</p>
+              <h4 class="text-lg font-bold text-slate-800">${asset.name}</h4>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <p><strong>หมวดหมู่:</strong> ${asset.category || '-'}</p>
+            <p><strong>รหัสสินค้า:</strong> ${asset.productCode || '-'}</p>
+            <p><strong>ราคา:</strong> ฿${Number(asset.price || 0).toLocaleString()}</p>
+            <p><strong>จำนวน:</strong> ${asset.quantity || 1}</p>
+            <p><strong>สถานที่:</strong> ${asset.location || '-'}</p>
+            <p><strong>วันที่ได้มา:</strong> ${asset.date || '-'}</p>
+            <p><strong>สถานะ:</strong> <span class="px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(asset.status)}">${asset.status || 'ใช้งานได้'}</span></p>
+            <p><strong>มีประกัน:</strong> ${asset.hasWarranty === 'true' || asset.hasWarranty === true ? 'มี' : 'ไม่มี'}</p>
+          </div>
+          ${warrantyHtml}
+        </div>
+        <div class="flex gap-2 mt-4 flex-wrap">
+          <button onclick="closeDetailModal(); openAssetForm('${asset.assetCode}')" class="flex-1 py-2 bg-blue-100 text-blue-700 rounded-lg font-semibold text-sm"><i class="fa-solid fa-edit mr-1"></i> แก้ไข</button>
+          <button onclick="closeDetailModal(); printSingleAsset('${asset.assetCode}')" class="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold text-sm"><i class="fa-solid fa-print mr-1"></i> พิมพ์บาร์โค้ด</button>
+          ${asset.image ? `<button onclick="downloadAssetImageById('${asset.assetCode}')" class="flex-1 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-semibold text-sm"><i class="fa-solid fa-download mr-1"></i> ดาวน์โหลดภาพ</button>` : ''}
+        </div>`;
+      document.getElementById('detail-content').innerHTML = html;
+      document.getElementById('detail-modal').classList.remove('hidden');
+    }
+
+    function closeDetailModal() {
+      document.getElementById('detail-modal').classList.add('hidden');
+    }
+
+    // ==================== PRINT BARCODE ====================
+function getSizeConfig(size) {
+  const configs = {
+    S: { cols: 8, fontSize: '9px', barcodeHeight: 40, margin: 8, barWidth: 1 },
+    M: { cols: 7, fontSize: '11px', barcodeHeight: 55, margin: 10, barWidth: 1 },
+    L: { cols: 6, fontSize: '13px', barcodeHeight: 70, margin: 12, barWidth: 2 }
+  };
+  return configs[size] || configs.M;
+}
+
+let currentPrintAssets = [];
+
+function openPrintModal(assets) {
+  currentPrintAssets = assets || [];
+  if (!currentPrintAssets.length) return;
+  document.getElementById('print-modal').classList.remove('hidden');
+  renderPrintPreview();
+}
+
+function closePrintModal() {
+  document.getElementById('print-modal').classList.add('hidden');
+  currentPrintAssets = [];
+}
+
+function renderPrintPreview() {
+  const container = document.getElementById('print-area');
+  const size = document.getElementById('print-size').value;
+  const copies = Math.max(1, parseInt(document.getElementById('print-copies').value) || 1);
+  const config = getSizeConfig(size);
+
+  // สร้างรายการสินค้าซ้ำตามจำนวนชุด
+  const expandedAssets = [];
+  currentPrintAssets.forEach(asset => {
+    for (let i = 0; i < copies; i++) {
+      expandedAssets.push(asset);
+    }
+  });
+
+  container.style.gridTemplateColumns = `repeat(${config.cols}, 1fr)`;
+  container.style.gap = '2px';
+
+  container.innerHTML = expandedAssets.map((asset, idx) => {
+    const safeId = asset.assetCode.replace(/[^a-zA-Z0-9_-]/g, '_') + '_' + idx;
+    return `
+      <div class="barcode-item" style="width:100%; margin:0 auto; text-align:center; border:1px dashed #cbd5e1; border-radius:0 !important; padding:2px;">
+        <div style="font-size:${config.fontSize}; font-weight:600;">${asset.name}</div>
+        <svg id="barcode-${safeId}" style="width:100%; height:${config.barcodeHeight}px; display:block; margin:0 auto;"></svg>
+        <div style="font-family:monospace; font-weight:bold; color:#1e40af; font-size:${config.fontSize};">${asset.assetCode}</div>
+      </div>
+    `;
+  }).join('');
+
+  // สร้างบาร์โค้ดหลังจาก DOM อัปเดต
+  setTimeout(() => {
+    expandedAssets.forEach((asset, idx) => {
+      const safeId = asset.assetCode.replace(/[^a-zA-Z0-9_-]/g, '_') + '_' + idx;
+      const el = document.getElementById('barcode-' + safeId);
+      if (el) {
+        try {
+          JsBarcode(el, asset.assetCode, {
+            format: 'CODE128',
+            width: config.barWidth,
+            height: config.barcodeHeight,
+            margin: config.margin,
+            displayValue: false
+          });
+        } catch (e) {
+          console.error('Barcode generation error:', e);
+        }
+      }
+    });
+  }, 100);
+}
+
+    // ==================== DOWNLOAD IMAGE ====================
+    function getDirectImageUrl(url) {
+      if (!url) return '';
+      let fileId = '';
+      if (url.includes('/file/d/')) { const m = url.match(/\/d\/([^/]+)/); if (m) fileId = m[1]; }
+      else if (url.includes('open?id=')) { const m = url.match(/id=([^&]+)/); if (m) fileId = m[1]; }
+      else if (url.includes('drive.google.com')) { const m = url.match(/[-\w]{25,}/); if (m) fileId = m[0]; }
+      return fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000` : url;
+    }
+
+    function getDownloadUrl(url) {
+      if (!url) return '';
+      let fileId = '';
+      if (url.includes('/file/d/')) { const m = url.match(/\/d\/([^/]+)/); if (m) fileId = m[1]; }
+      else if (url.includes('open?id=')) { const m = url.match(/id=([^&]+)/); if (m) fileId = m[1]; }
+      else if (url.includes('drive.google.com')) { const m = url.match(/[-\w]{25,}/); if (m) fileId = m[0]; }
+      return fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : url;
+    }
+
+    async function downloadAssetImage(asset) {
+      try {
+        const downloadUrl = getDownloadUrl(asset.image);
+        if (!downloadUrl) return;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `${asset.assetCode || 'image'}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch (e) {
+        window.open(getDirectImageUrl(asset.image), '_blank');
+      }
+    }
+
+    async function downloadAssetImageById(assetCode) {
+      const asset = allAssets.find(a => a.assetCode === assetCode);
+      if (asset) await downloadAssetImage(asset);
+    }
+
+    // ==================== SCANNER ====================
+    function startScanner(target) {
+      document.getElementById('scanner-overlay').classList.remove('hidden');
+      document.getElementById('scanner-reader').innerHTML = '';
+      const qr = new Html5Qrcode('scanner-reader');
+      scannerInstance = qr;
+      const formatsToSupport = [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E
+      ];
+      qr.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 }, formatsToSupport },
+        (decodedText) => {
+          if (target === 'search') {
+            const asset = allAssets.find(a => a.assetCode === decodedText || a.productCode === decodedText);
+            if (asset) openDetailModal(asset.assetCode);
+            else {
+              document.getElementById('search-input').value = decodedText;
+              currentPage = 1;
+              renderAll();
+            }
+          } else if (target === 'product') {
+            document.getElementById('form-product-code').value = decodedText;
+          }
+          stopScanner();
+        },
+        (error) => { /* ignore */ }
+      ).catch(err => {
+        alert('ไม่สามารถใช้กล้องได้: ' + err.message);
+        stopScanner();
+      });
+    }
+
+    function stopScanner() {
+      if (scannerInstance) {
+        scannerInstance.stop().then(() => scannerInstance.clear()).catch(() => {});
+        scannerInstance = null;
+      }
+      document.getElementById('scanner-overlay').classList.add('hidden');
+    }
+
+    // ==================== CAMERA & IMAGE ====================
+    function startCamera() {
+      document.getElementById('camera-overlay').classList.remove('hidden');
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(stream => {
+          cameraStream = stream;
+          document.getElementById('camera-video').srcObject = stream;
+        })
+        .catch(err => {
+          alert('ไม่สามารถเปิดกล้อง: ' + err.message);
+          stopCamera();
+        });
+    }
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+      document.getElementById('camera-overlay').classList.add('hidden');
+    }
+
+    function capturePhoto() {
+      const video = document.getElementById('camera-video');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const img = new Image();
+      img.onload = () => {
+        selectedImageData = compressImage(img);
+        document.getElementById('image-preview').innerHTML = `<img src="${selectedImageData}" class="w-full h-full object-contain">`;
+        stopCamera();
+      };
+      img.src = canvas.toDataURL('image/jpeg');
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          selectedImageData = compressImage(img);
+          document.getElementById('image-preview').innerHTML = `<img src="${selectedImageData}" class="w-full h-full object-contain">`;
+        };
+        img.onerror = () => {
+          alert('ไม่สามารถอ่านไฟล์รูปภาพได้');
+        };
+        img.src = e.target.result;
+      };
+      reader.onerror = () => {
+        alert('ไม่สามารถอ่านไฟล์ได้');
+      };
+      reader.readAsDataURL(file);
+      // รีเซ็ตค่า input เพื่อให้เลือกไฟล์เดิมซ้ำได้
+      event.target.value = '';
+    }
+
+    function compressImage(img) {
+      const canvas = document.createElement('canvas');
+      const MAX_WIDTH = 700;
+      const scaleSize = MAX_WIDTH / img.width;
+      canvas.width = MAX_WIDTH;
+      canvas.height = img.height * scaleSize;
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.7);
+    }
+
+    // ==================== VIEW TOGGLE ====================
+    function toggleView() {
+      currentTab = currentTab === 'table' ? 'gallery' : 'table';
+      const btn = document.getElementById('view-toggle-btn');
+      btn.innerHTML = currentTab === 'table'
+        ? '<i data-lucide="table-properties" class="w-5 h-5"></i>'
+        : '<i data-lucide="grid-2x2" class="w-5 h-5"></i>';
+      lucide.createIcons();
+      document.getElementById('table-view').classList.toggle('hidden', currentTab !== 'table');
+      document.getElementById('gallery-view').classList.toggle('hidden', currentTab !== 'gallery');
+      renderAll();
+    }
+
+    // ==================== TOGGLE STATS ====================
+    function toggleStats() {
+      document.getElementById('stats-section').classList.toggle('hidden');
+    }
+
+    // ==================== INIT ====================
+    window.addEventListener('load', () => {
+      lucide.createIcons();
+      loadCategories();
+      loadAssets();
+      document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderAll(); });
+
+      document.getElementById('print-size').addEventListener('change', () => {
+  const selected = allAssets.filter(a => selectedAssets.has(a.assetCode));
+  if (selected.length > 0) {
+    openPrintModal(selected);
+  }
+});
+    });
+  </script>
+</body>
+</html>
