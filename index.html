@@ -16,40 +16,38 @@
     }
   </script>
   <script>
-    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzvm-A2ZSNhmISDQhucP88Mrf9PVF1DRDryCFPh2Cuk7jvVvfYO3HsZGKLaB5MtOldb/exec';
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwW2N4Y7MR2l9w8CL4LT_fRXSyrEvxw7qapps6ebX1u79D9KbpcFcgg9YwMtN22fCLO/exec';
 
     function installGasFetchBridge() {
       if (typeof google !== 'undefined' && google.script && google.script.run) return;
-      window.google = { script: {} };
-      window.google.script.run = new Proxy({}, {
-        get: function(target, prop) {
-          if (prop === 'withSuccessHandler') {
-            return function(callback) {
-              return new Proxy({}, {
-                get: function(_, method) {
-                  if (method === 'withFailureHandler') return function() { return this; };
-                  return function() {
-                    var args = Array.prototype.slice.call(arguments);
-                    fetch(GAS_API_URL, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'text/plain' },
-                      body: JSON.stringify({ action: String(method), args: args })
-                    }).then(function(res) {
-                      return res.json();
-                    }).then(function(data) {
-                      if (data && data.success === false && data.message) throw new Error(data.message);
-                      callback(data);
-                    }).catch(function(err) {
-                      alert('เชื่อมต่อ GAS ไม่สำเร็จ: ' + err.message);
-                    });
-                  };
-                }
+      function makeRunner(successHandler, failureHandler) {
+        return new Proxy({}, {
+          get: function(_, method) {
+            if (method === 'withSuccessHandler') return function(handler) { return makeRunner(handler, failureHandler); };
+            if (method === 'withFailureHandler') return function(handler) { return makeRunner(successHandler, handler); };
+            return function() {
+              var args = Array.prototype.slice.call(arguments);
+              fetch(GAS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: String(method), args: args }),
+                cache: 'no-store'
+              }).then(function(res) {
+                return res.json().then(function(data) {
+                  if (!res.ok || (data && data.success === false)) throw new Error((data && data.message) || ('GAS ตอบกลับ HTTP ' + res.status));
+                  return data;
+                });
+              }).then(function(data) {
+                if (typeof successHandler === 'function') successHandler(data);
+              }).catch(function(error) {
+                if (typeof failureHandler === 'function') failureHandler(error);
+                else alert('เชื่อมต่อ GAS ไม่สำเร็จ: ' + error.message);
               });
             };
           }
-          return function() {};
-        }
-      });
+        });
+      }
+      window.google = { script: { run: makeRunner(null, null) } };
     }
     installGasFetchBridge();
   </script>
@@ -610,6 +608,7 @@
           order['Shipping Carrier'], items
         ].join(' ').toLowerCase().indexOf(term) !== -1;
       });
+      filteredOrders.sort(compareOrdersNewestFirst);
       if (!filteredOrders.length) {
         tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">ไม่มีข้อมูลคำสั่งซื้อ</td></tr>';
         renderOrdersPagination(0, 0, 0);
@@ -651,6 +650,15 @@
       }
       tbody.innerHTML = html;
       renderOrdersPagination(totalPages, pending.length, filteredOrders.length);
+    }
+
+    function compareOrdersNewestFirst(a, b) {
+      var timeA = new Date(a['Timestamp'] || '').getTime();
+      var timeB = new Date(b['Timestamp'] || '').getTime();
+      if (!isFinite(timeA)) timeA = 0;
+      if (!isFinite(timeB)) timeB = 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return String(b['Order ID'] || '').localeCompare(String(a['Order ID'] || ''), undefined, { numeric: true });
     }
 
     function isOrderInProgress(status) {
@@ -815,20 +823,24 @@
       return match ? match[0] : '';
     }
 
-    function buildCellXml(ref, type, value, existingCellXml) {
+    function buildCellXml(ref, type, value, existingCellXml, cachedValue, cachedType) {
       var style = getCellStyleAttr(existingCellXml);
       if (type === 'blank') return '<c r="' + ref + '"' + style + '/>';
       if (type === 'number') return '<c r="' + ref + '"' + style + '><v>' + Number(value || 0) + '</v></c>';
-      if (type === 'formula') return '<c r="' + ref + '"' + style + '><f>' + escapeXml(value) + '</f></c>';
+      if (type === 'formula') {
+        var resultType = cachedType === 'string' ? ' t="str"' : '';
+        var cachedXml = cachedValue === undefined ? '' : '<v>' + escapeXml(cachedValue) + '</v>';
+        return '<c r="' + ref + '"' + style + resultType + '><f>' + escapeXml(value) + '</f>' + cachedXml + '</c>';
+      }
       var text = String(value == null ? '' : value);
       var space = /^\s|\s$/.test(text) ? ' xml:space="preserve"' : '';
       return '<c r="' + ref + '"' + style + ' t="inlineStr"><is><t' + space + '>' + escapeXml(text) + '</t></is></c>';
     }
 
-    function replaceCellInRow(rowXml, ref, type, value) {
+    function replaceCellInRow(rowXml, ref, type, value, cachedValue, cachedType) {
       var cellPattern = new RegExp('<c\\b(?=[^>]*\\br="' + escapeRegExp(ref) + '"(?=[\\s\\/>]))[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)');
       var existing = rowXml.match(cellPattern);
-      var newCell = buildCellXml(ref, type, value, existing ? existing[0] : '');
+      var newCell = buildCellXml(ref, type, value, existing ? existing[0] : '', cachedValue, cachedType);
       if (existing) return rowXml.replace(cellPattern, newCell);
 
       var targetColumn = cellColumnIndex(ref);
@@ -842,14 +854,14 @@
       return rowXml.replace(/<\/row>$/, newCell + '</row>');
     }
 
-    function replaceCellXml(xml, ref, type, value) {
+    function replaceCellXml(xml, ref, type, value, cachedValue, cachedType) {
       var rowNumber = Number(ref.match(/\d+/)[0]);
       var rowPattern = new RegExp('<row\\b(?=[^>]*\\br="' + rowNumber + '"(?=[\\s>]))[^>]*>[\\s\\S]*?<\\/row>');
       var rowMatch = xml.match(rowPattern);
       if (rowMatch) {
-        return xml.replace(rowPattern, replaceCellInRow(rowMatch[0], ref, type, value));
+        return xml.replace(rowPattern, replaceCellInRow(rowMatch[0], ref, type, value, cachedValue, cachedType));
       }
-      var newRow = '<row r="' + rowNumber + '">' + buildCellXml(ref, type, value, '') + '</row>';
+      var newRow = '<row r="' + rowNumber + '">' + buildCellXml(ref, type, value, '', cachedValue, cachedType) + '</row>';
       var sheetDataClose = xml.indexOf('</sheetData>');
       if (sheetDataClose !== -1) return xml.slice(0, sheetDataClose) + newRow + xml.slice(sheetDataClose);
       return xml;
@@ -867,8 +879,8 @@
       return replaceCellXml(xml, ref, 'number', value);
     }
 
-    function setCellFormula(xml, ref, formula) {
-      return replaceCellXml(xml, ref, 'formula', formula);
+    function setCellFormula(xml, ref, formula, cachedValue, cachedType) {
+      return replaceCellXml(xml, ref, 'formula', formula, cachedValue, cachedType);
     }
 
     function thaiBahtText(value) {
@@ -924,13 +936,14 @@
       var isBillingSheet = sheetName === 'ต้นฉบับ(ใบวางบิล)';
       var billingSheetRef = "'ต้นฉบับ(ใบวางบิล)'!";
       var receiptSheetRef = "'ต้นฉบับ(ใบเสร็จรับเงิน)'!";
+      var invoiceNumberText = 'ใบกำกับภาษีเลขที่ ' + orderId;
 
       xml = setCellText(xml, 'A7', 'ชื่อลูกค้า : ' + customerName);
-      xml = isBillingSheet ? setCellText(xml, 'I7', orderId) : setCellFormula(xml, 'I7', sheetName === 'สำเนา(ใบเสร็จรับเงิน)' ? receiptSheetRef + 'I7' : billingSheetRef + 'I7');
+      xml = isBillingSheet ? setCellText(xml, 'I7', orderId) : setCellFormula(xml, 'I7', sheetName === 'สำเนา(ใบเสร็จรับเงิน)' ? receiptSheetRef + 'I7' : billingSheetRef + 'I7', orderId, 'string');
       xml = setCellText(xml, 'A9', 'ที่อยู่ลูกค้า : ' + customerAddress);
-      xml = isBillingSheet ? setCellNumber(xml, 'I9', excelDateSerial(orderDate)) : setCellFormula(xml, 'I9', sheetName === 'สำเนา(ใบเสร็จรับเงิน)' ? receiptSheetRef + 'I9' : billingSheetRef + 'I9');
-      xml = isBillingSheet ? setCellText(xml, 'A11', 'เลขประจำผู้เสียภาษีอากร : ') : setCellFormula(xml, 'A11', billingSheetRef + 'A11');
-      xml = isBillingSheet ? setCellText(xml, 'H11', 'ใบกำกับภาษีเลขที่ ' + orderId) : setCellFormula(xml, 'H11', sheetName === 'สำเนา(ใบเสร็จรับเงิน)' ? receiptSheetRef + 'H11' : billingSheetRef + 'H11');
+      xml = isBillingSheet ? setCellNumber(xml, 'I9', excelDateSerial(orderDate)) : setCellFormula(xml, 'I9', sheetName === 'สำเนา(ใบเสร็จรับเงิน)' ? receiptSheetRef + 'I9' : billingSheetRef + 'I9', excelDateSerial(orderDate), 'number');
+      xml = isBillingSheet ? setCellText(xml, 'A11', 'เลขประจำผู้เสียภาษีอากร : ') : setCellFormula(xml, 'A11', billingSheetRef + 'A11', 'เลขประจำผู้เสียภาษีอากร : ', 'string');
+      xml = isBillingSheet ? setCellText(xml, 'H11', invoiceNumberText) : setCellFormula(xml, 'H11', sheetName === 'สำเนา(ใบเสร็จรับเงิน)' ? receiptSheetRef + 'H11' : billingSheetRef + 'H11', invoiceNumberText, 'string');
 
       for (var row = 14; row <= 27; row++) {
         xml = setCellBlank(xml, 'A' + row);
@@ -949,30 +962,30 @@
         });
       }
 
-      for (var i = 0; i < visibleItems.length; i++) {
+      for (var i = 0; i < maxRows; i++) {
         var targetRow = 14 + i;
+        var lineItem = visibleItems[i];
         if (isBillingSheet) {
-          xml = setCellNumber(xml, 'A' + targetRow, i + 1);
-          xml = setCellText(xml, 'B' + targetRow, visibleItems[i].name);
-          xml = setCellNumber(xml, 'I' + targetRow, visibleItems[i].subtotal || 0);
+          if (lineItem) {
+            xml = setCellNumber(xml, 'A' + targetRow, i + 1);
+            xml = setCellText(xml, 'B' + targetRow, lineItem.name);
+            xml = setCellNumber(xml, 'I' + targetRow, lineItem.subtotal || 0);
+          }
         } else {
-          xml = setCellFormula(xml, 'A' + targetRow, 'IF(' + billingSheetRef + 'B' + targetRow + '<>"",' + billingSheetRef + 'A' + targetRow + ',"")');
-          xml = setCellFormula(xml, 'B' + targetRow, 'IF(' + billingSheetRef + 'B' + targetRow + '<>"",' + billingSheetRef + 'B' + targetRow + ',"")');
-          xml = setCellFormula(xml, 'I' + targetRow, 'IF(' + billingSheetRef + 'B' + targetRow + '<>"",' + billingSheetRef + 'I' + targetRow + ',"")');
-        }
-      }
-      if (!isBillingSheet) {
-        for (var linkRow = 14; linkRow <= 27; linkRow++) {
-          xml = setCellFormula(xml, 'A' + linkRow, 'IF(' + billingSheetRef + 'B' + linkRow + '<>"",' + billingSheetRef + 'A' + linkRow + ',"")');
-          xml = setCellFormula(xml, 'B' + linkRow, 'IF(' + billingSheetRef + 'B' + linkRow + '<>"",' + billingSheetRef + 'B' + linkRow + ',"")');
-          xml = setCellFormula(xml, 'I' + linkRow, 'IF(' + billingSheetRef + 'B' + linkRow + '<>"",' + billingSheetRef + 'I' + linkRow + ',"")');
+          var hasLineItem = !!lineItem;
+          xml = setCellFormula(xml, 'A' + targetRow, 'IF(' + billingSheetRef + 'B' + targetRow + '<>"",' + billingSheetRef + 'A' + targetRow + ',"")', hasLineItem ? i + 1 : '', hasLineItem ? 'number' : 'string');
+          xml = setCellFormula(xml, 'B' + targetRow, 'IF(' + billingSheetRef + 'B' + targetRow + '<>"",' + billingSheetRef + 'B' + targetRow + ',"")', hasLineItem ? lineItem.name : '', 'string');
+          xml = setCellFormula(xml, 'I' + targetRow, 'IF(' + billingSheetRef + 'B' + targetRow + '<>"",' + billingSheetRef + 'I' + targetRow + ',"")', hasLineItem ? Number(lineItem.subtotal || 0) : '', hasLineItem ? 'number' : 'string');
         }
       }
 
-      xml = setCellFormula(xml, 'I28', 'SUM(I14:I27)');
-      xml = setCellFormula(xml, 'I29', 'I28*7%');
-      xml = setCellFormula(xml, 'I30', 'SUM(I28:I29)');
-      xml = setCellFormula(xml, 'A31', 'BAHTTEXT(I30)');
+      var subtotal = visibleItems.reduce(function(sum, item) { return sum + Number(item.subtotal || 0); }, 0);
+      var vat = subtotal * 0.07;
+      var grandTotal = subtotal + vat;
+      xml = setCellFormula(xml, 'I28', 'SUM(I14:I27)', subtotal, 'number');
+      xml = setCellFormula(xml, 'I29', 'I28*7%', vat, 'number');
+      xml = setCellFormula(xml, 'I30', 'SUM(I28:I29)', grandTotal, 'number');
+      xml = setCellFormula(xml, 'A31', 'BAHTTEXT(I30)', thaiBahtText(grandTotal), 'string');
       return xml;
     }
 
@@ -1313,8 +1326,15 @@
     let creatingNewStockProduct = false;
     let newStockProductDraft = null;
 
-    function loadStock() {
+    function loadStock(onLoaded, onFailed) {
       google.script.run.withSuccessHandler(function(data) {
+        if (!Array.isArray(data)) {
+          var invalidMessage = 'GAS ส่งข้อมูลสต็อกกลับมาไม่ถูกต้อง';
+          var invalidBody = document.getElementById('stock-table-tbody');
+          if (invalidBody) invalidBody.innerHTML = '<tr><td colspan="9" class="text-center py-10 text-red-600">' + invalidMessage + '</td></tr>';
+          if (typeof onFailed === 'function') onFailed(new Error(invalidMessage));
+          return;
+        }
         allStockData = data || [];
         stockRowDrafts = {};
         allStockData.forEach(function(item) {
@@ -1322,6 +1342,14 @@
         });
         renderStockCategoryChips();
         renderStockTable();
+        if (typeof onLoaded === 'function') onLoaded();
+      }).withFailureHandler(function(error) {
+        var message = 'โหลดข้อมูลสต็อกไม่สำเร็จ: ' + (error && error.message ? error.message : error);
+        var tbody = document.getElementById('stock-table-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="text-center py-10 text-red-600">' + escapeHtml(message) + '</td></tr>';
+        var cards = document.getElementById('stock-card-view');
+        if (cards) cards.innerHTML = '<div class="col-span-full text-center py-10 text-red-600">' + escapeHtml(message) + '</div>';
+        if (typeof onFailed === 'function') onFailed(error);
       }).getStockData();
     }
 
@@ -1484,7 +1512,7 @@
         : '<div class="h-36 mb-3 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300"><i class="fa-solid fa-image text-3xl"></i></div>';
       var optionsHtml = '';
       if (children.length) {
-        var expanded = stockGalleryExpanded[item.number] === true;
+        var expanded = stockGalleryExpanded[item.number] !== false;
         var optionRows = children.map(function(child) {
           var optionPrice = Number(child.price || 0) > 0 ? Number(child.price) : Number(item.price || 0);
           return '<button type="button" onclick="event.stopPropagation(); openProductDetail(\'' + escapeJs(child.number) + '\')" class="w-full flex items-center justify-between gap-2 py-2 border-b border-slate-100 text-left hover:bg-slate-50">' +
@@ -1519,7 +1547,7 @@
     }
 
     function toggleStockGalleryChoices(number) {
-      stockGalleryExpanded[number] = stockGalleryExpanded[number] !== true;
+      stockGalleryExpanded[number] = stockGalleryExpanded[number] === false;
       renderStockTable();
     }
 
@@ -2271,10 +2299,17 @@
           return;
         }
         restoreProductDetailSaveButton(saveBtn);
+        var addedNumber = String(res.number);
         closeProductDetail();
         var searchInput = document.getElementById('stock-search-input');
         if (searchInput) searchInput.value = '';
-        loadStock();
+        loadStock(function() {
+          var addedRow = document.getElementById('stock-row-' + cssSafeId(addedNumber));
+          if (addedRow) addedRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          else alert('บันทึกสินค้าแล้ว แต่ไม่พบแถวสินค้า #' + addedNumber + ' หลังโหลดใหม่');
+        }, function(error) {
+          alert('บันทึกสินค้าแล้ว แต่โหลดรายการกลับมาไม่สำเร็จ: ' + (error && error.message ? error.message : error));
+        });
       }).withFailureHandler(fail).addProduct(payload);
     }
 
