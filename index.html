@@ -16,7 +16,7 @@
     }
   </script>
   <script>
-    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzXjs8H2jIG7bveswFma7mV5AurF_4EWSWHVkpHQOAKIo2iP5-_VwI0hXqnVPj82hoC/exec';
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzvm-A2ZSNhmISDQhucP88Mrf9PVF1DRDryCFPh2Cuk7jvVvfYO3HsZGKLaB5MtOldb/exec';
 
     function installGasFetchBridge() {
       if (typeof google !== 'undefined' && google.script && google.script.run) return;
@@ -122,7 +122,7 @@
     .action-btn + .action-btn {
       margin-left: 0.25rem;
     }
-    .detail-actions .action-btn:hover {
+    .detail-actions .action-btn {
       width: auto;
       max-width: none;
       padding-left: 0.75rem;
@@ -134,7 +134,7 @@
       overflow: hidden;
       transition: max-width 0.22s ease, opacity 0.16s ease;
     }
-    .detail-actions .action-btn:hover .action-label {
+    .detail-actions .action-label {
       max-width: none;
       opacity: 1;
     }
@@ -322,10 +322,10 @@
   </div>
 
   <!-- Product Detail Modal -->
-  <div id="product-detail-modal" class="fixed inset-0 z-50 bg-black/40 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl w-full max-w-3xl shadow-xl max-h-[92vh] overflow-y-auto">
+  <div id="product-detail-modal" class="fixed inset-0 z-50 bg-black/40 hidden flex items-center justify-center p-4" onclick="handleProductDetailBackdropClick(event)">
+    <div class="bg-white rounded-2xl w-full max-w-3xl shadow-xl max-h-[92vh] overflow-y-auto" onclick="event.stopPropagation()">
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-        <h3 class="text-lg font-bold text-blue-950">รายละเอียดสินค้า</h3>
+        <h3 id="product-detail-title" class="text-lg font-bold text-blue-950">รายละเอียดสินค้า</h3>
         <button onclick="tryCloseProductDetail()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">&times;</button>
       </div>
       <div id="product-detail-content" class="p-6"></div>
@@ -472,6 +472,7 @@
             return {
               number: String(item.number || '').trim(),
               name: String(item.name || '').trim(),
+              productName: String(item.productName || '').trim(),
               quantity: Number(item.quantity || 0),
               price: Number(item.price || 0),
               subtotal: Number(item.subtotal || 0)
@@ -516,14 +517,22 @@
     }
 
     function resolveOrderItemName(item) {
-      var stockItem = getStockLookup(item.number);
-      if (stockItem) {
-        var productName = stockItem.productName || stockItem.name || item.name;
-        var choiceName = stockItem.choiceName || '';
-        if (choiceName && choiceName !== productName) return productName + ' - ' + choiceName;
-        return productName;
+      var number = String(item.number || '').trim();
+      var itemName = String(item.name || '').trim();
+      var stockItem = getStockLookup(number);
+      if (number.indexOf('0.') === 0 || itemName === 'ค่าส่ง') {
+        var shippingChoice = (stockItem && stockItem.choiceName) || itemName;
+        return shippingChoice && shippingChoice !== 'ค่าส่ง' ? 'ค่าส่ง - ' + shippingChoice : 'ค่าส่ง';
       }
-      return item.name || '-';
+
+      var parentItem = number.indexOf('.') !== -1 ? getStockLookup(number.split('.')[0]) : null;
+      var productName = item.productName ||
+        (stockItem && (stockItem.productName || (!stockItem.choiceName ? stockItem.name : ''))) ||
+        (parentItem && (parentItem.productName || parentItem.name)) || '';
+      var choiceName = (stockItem && stockItem.choiceName) ||
+        (number.indexOf('.') !== -1 && itemName !== productName ? itemName : '');
+      if (productName && choiceName && choiceName !== productName) return productName + ' - ' + choiceName;
+      return productName || itemName || '-';
     }
 
     function renderOrderItems(itemsText) {
@@ -1296,10 +1305,13 @@
     let stockSelectMode = false;
     let selectedProducts = new Set();
     let stockView = 'table';
+    let stockGalleryExpanded = {};
     let stockUndoStack = [];
     let stockRedoStack = [];
     let selectedStockDetailNumber = null;
     let productDetailDirty = false;
+    let creatingNewStockProduct = false;
+    let newStockProductDraft = null;
 
     function loadStock() {
       google.script.run.withSuccessHandler(function(data) {
@@ -1407,6 +1419,25 @@
       if (!tbody) return;
       var term = (document.getElementById('stock-search-input')?.value || '').trim().toLowerCase();
       var category = getSelectedStockCategory();
+      if (stockView === 'cards') {
+        renderStockViewShell();
+        var cardView = document.getElementById('stock-card-view');
+        var cardGroups = allStockData.filter(function(main) {
+          var children = main.children || [];
+          var groupItems = [main].concat(children);
+          if (category && !groupItems.some(function(item) { return (item.category || main.category) === category; })) return false;
+          if (!term) return true;
+          return groupItems.some(function(item) {
+            return (String(item.number || '') + ' ' + String(item.productName || item.name || '') + ' ' + String(item.choiceName || '') + ' ' + String(item.category || main.category || '') + ' ' + String(item.productCode || '')).toLowerCase().indexOf(term) !== -1;
+          });
+        });
+        if (cardView) {
+          cardView.innerHTML = cardGroups.length
+            ? cardGroups.map(function(main) { return renderStockCard(normalizeStockItem(main, false, main.productName || main.name, main.number, (main.children || []).length)); }).join('')
+            : '<div class="col-span-full text-center py-10 text-slate-400">ไม่มีสินค้า</div>';
+        }
+        return;
+      }
       var rows = flattenStockItems().filter(function(item) {
         if (category && item.category !== category) return false;
         if (!term) return true;
@@ -1414,20 +1445,10 @@
       });
       if (!rows.length) {
         renderStockViewShell();
-        if (stockView === 'cards') {
-          var cardView = document.getElementById('stock-card-view');
-          if (cardView) cardView.innerHTML = '<div class="col-span-full text-center py-10 text-slate-400">ไม่มีสินค้า</div>';
-        } else {
-          tbody.innerHTML = '<tr><td colspan="9" class="text-center py-10 text-slate-400">ไม่มีสินค้า</td></tr>';
-        }
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-10 text-slate-400">ไม่มีสินค้า</td></tr>';
         return;
       }
       renderStockViewShell();
-      if (stockView === 'cards') {
-        var cardView = document.getElementById('stock-card-view');
-        if (cardView) cardView.innerHTML = rows.map(renderStockCard).join('');
-        return;
-      }
       tbody.innerHTML = rows.map(renderStockTableRow).join('');
     }
 
@@ -1455,10 +1476,36 @@
       var statusClass = !tracked ? 'bg-slate-100 text-slate-500' : (statusStock <= 0 ? 'bg-red-100 text-red-700' : (statusStock <= Number(item.lowStock || 0) ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'));
       var status = !tracked ? '-' : (statusStock <= 0 ? 'หมดแล้ว' : (statusStock <= Number(item.lowStock || 0) ? 'ใกล้หมดแล้ว!' : 'มีของ'));
       var selectBox = stockSelectMode && !isShippingStockNumber(item.number) ? '<input type="checkbox" class="absolute top-3 right-3 accent-blue-700" data-number="' + escapeHtml(item.number) + '" ' + (selectedProducts.has(String(item.number)) ? 'checked' : '') + ' onclick="event.stopPropagation(); toggleProductCheckbox(this)">' : '';
+      var main = allStockData.find(function(row) { return String(row.number) === String(item.number); }) || {};
+      var children = main.children || [];
+      var pics = String(item.pictureUrl || '').split(',').map(function(url) { return url.trim(); }).filter(Boolean);
+      var pictureHtml = pics.length
+        ? '<div class="h-36 mb-3 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-center overflow-hidden"><img src="' + escapeHtml(getDirectImageUrl(pics[0])) + '" alt="' + escapeHtml(item.name) + '" class="h-full w-full object-contain p-2" onerror="this.style.display=\'none\'"></div>'
+        : '<div class="h-36 mb-3 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300"><i class="fa-solid fa-image text-3xl"></i></div>';
+      var optionsHtml = '';
+      if (children.length) {
+        var expanded = stockGalleryExpanded[item.number] === true;
+        var optionRows = children.map(function(child) {
+          var optionPrice = Number(child.price || 0) > 0 ? Number(child.price) : Number(item.price || 0);
+          return '<button type="button" onclick="event.stopPropagation(); openProductDetail(\'' + escapeJs(child.number) + '\')" class="w-full flex items-center justify-between gap-2 py-2 border-b border-slate-100 text-left hover:bg-slate-50">' +
+            '<span class="font-semibold text-sm text-slate-800">' + escapeHtml(child.choiceName || child.name || '-') + '</span>' +
+            '<span class="flex items-center gap-2 text-xs">' +
+              (optionPrice > 0 ? '<span class="rounded-full bg-blue-50 text-blue-700 px-2 py-1 font-bold">' + escapeHtml(optionPrice.toFixed(2)) + ' ฿</span>' : '') +
+              (tracked ? '<span class="text-slate-600">คงเหลือ <b class="text-blue-700">' + escapeHtml(child.stock || 0) + '</b></span>' : '') +
+            '</span>' +
+          '</button>';
+        }).join('');
+        optionsHtml = '<div class="mt-3 border-t border-slate-100 pt-2">' +
+          '<div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>ตัวเลือก</span><span>ราคา / สต็อก</span></div>' +
+          '<div ' + (expanded ? '' : 'style="display:none"') + '>' + optionRows + '</div>' +
+          '<button type="button" onclick="event.stopPropagation(); toggleStockGalleryChoices(\'' + escapeJs(item.number) + '\')" class="mt-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg text-xs">' + (expanded ? 'ซ่อนตัวเลือก' : 'แสดงตัวเลือกทั้งหมด') + '</button>' +
+        '</div>';
+      }
       return '<div onclick="openProductDetail(\'' + escapeJs(item.number) + '\')" class="stock-card relative rounded-xl border border-slate-200 bg-white p-4 cursor-pointer">' +
         selectBox +
+        pictureHtml +
         '<div class="flex items-start justify-between gap-3 mb-3">' +
-          '<div><div class="font-mono text-xs text-slate-400">' + escapeHtml(item.number) + '</div><div class="font-bold text-slate-900">' + escapeHtml(item.name) + '</div></div>' +
+          '<div><div class="font-mono text-xs text-slate-400">' + escapeHtml(item.number) + '</div><div class="font-bold text-slate-900">' + escapeHtml(item.productName || item.name) + '</div></div>' +
           '<span class="chip-nowrap px-2.5 py-1 rounded-full text-xs font-bold ' + statusClass + '">' + escapeHtml(status) + '</span>' +
         '</div>' +
         '<div class="grid grid-cols-2 gap-2 text-sm">' +
@@ -1467,7 +1514,13 @@
           '<div class="rounded-lg bg-slate-50 p-2 text-right"><div class="text-slate-400 text-xs">สต็อก</div><b class="' + (hasOptions ? 'text-slate-400' : 'text-blue-700') + '">' + (tracked ? escapeHtml(displayStock) : '-') + '</b></div>' +
           '<div class="rounded-lg bg-slate-50 p-2 text-right"><div class="text-slate-400 text-xs">Awaiting</div><b class="' + (displayAwaiting > 0 ? 'text-red-600' : 'text-blue-700') + '">' + (tracked ? escapeHtml(displayAwaiting) : '-') + '</b></div>' +
         '</div>' +
+        optionsHtml +
       '</div>';
+    }
+
+    function toggleStockGalleryChoices(number) {
+      stockGalleryExpanded[number] = stockGalleryExpanded[number] !== true;
+      renderStockTable();
     }
 
     function renderStockTableRow(item) {
@@ -1956,20 +2009,35 @@
     function openProductDetail(number) {
       var item = getStockItemByNumber(number);
       if (!item) return;
-      selectedStockDetailNumber = number;
+      showProductDetail(item, false);
+    }
+
+    function openAddProduct() {
+      newStockProductDraft = {
+        number: '', productName: '', name: '', choiceName: '', category: '', productCode: '',
+        price: 0, stock: 0, lowStock: 3, awaitingShipment: 0, pictureUrl: '',
+        isChild: false, childCount: 0, isStockTracked: true
+      };
+      showProductDetail(newStockProductDraft, true);
+    }
+
+    function showProductDetail(item, isNew) {
+      creatingNewStockProduct = !!isNew;
+      selectedStockDetailNumber = isNew ? null : item.number;
       productDetailDirty = false;
+      document.getElementById('product-detail-title').textContent = isNew ? 'เพิ่มสินค้าใหม่' : 'รายละเอียดสินค้า';
       var pics = item.pictureUrl ? item.pictureUrl.split(',').map(function(u){ return u.trim(); }).filter(Boolean) : [];
       var firstPic = pics.length ? getDirectImageUrl(pics[0]) : '';
       var imageHtml = firstPic ? '<img src="' + escapeHtml(firstPic) + '" class="max-h-80 mx-auto object-contain rounded-xl border border-slate-200 bg-slate-50">' : '<div class="h-44 rounded-xl bg-slate-100 flex items-center justify-center text-slate-300"><i class="fa-solid fa-image text-4xl"></i></div>';
       var hasOptions = !item.isChild && hasChildOptions(item.number);
       var mainHasPricedOptions = !item.isChild && hasPricedChildren(item.number);
-      var productFieldClass = hasOptions ? 'md:col-span-2' : '';
+      var productFieldClass = hasOptions || isNew ? 'md:col-span-2' : '';
       document.getElementById('product-detail-content').innerHTML =
         '<div class="space-y-5">' +
           imageHtml +
           '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
             detailField('ชื่อสินค้า (Product)', 'detail-productName', item.productName || item.name, 'text', productFieldClass) +
-            (hasOptions ? '' : detailField('ตัวเลือก (Choice)', 'detail-choiceName', item.choiceName, 'text')) +
+            (hasOptions || isNew ? '' : detailField('ตัวเลือก (Choice)', 'detail-choiceName', item.choiceName, 'text')) +
             detailField('หมวดหมู่ (Category)', 'detail-category', item.category, 'text') +
             detailField('รหัสสินค้า', 'detail-productCode', item.productCode, 'text') +
             (mainHasPricedOptions ? '' : detailField('ราคา', 'detail-price', item.price, 'number')) +
@@ -2089,16 +2157,27 @@
 
     function tryCloseProductDetail() {
       if (productDetailDirty) {
-        alert('มีการแก้ไขค้างอยู่ กรุณากดบันทึกหรือยกเลิกก่อน');
+        scrollProductDetailToActions();
         return;
       }
       closeProductDetail();
+    }
+
+    function handleProductDetailBackdropClick(event) {
+      if (event.target && event.target.id === 'product-detail-modal') tryCloseProductDetail();
+    }
+
+    function scrollProductDetailToActions() {
+      var panel = document.querySelector('#product-detail-modal > div');
+      if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: 'smooth' });
     }
 
     function closeProductDetail() {
       document.getElementById('product-detail-modal').classList.add('hidden');
       selectedStockDetailNumber = null;
       productDetailDirty = false;
+      creatingNewStockProduct = false;
+      newStockProductDraft = null;
     }
 
     function cancelProductDetail() {
@@ -2106,14 +2185,15 @@
     }
 
     function saveProductDetail() {
-      var item = getStockItemByNumber(selectedStockDetailNumber);
+      var isNew = creatingNewStockProduct;
+      var item = isNew ? newStockProductDraft : getStockItemByNumber(selectedStockDetailNumber);
       if (!item) return;
       var saveBtn = document.getElementById('save-product-detail-btn');
       if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>กำลังบันทึก';
       }
-      var mainHasPricedOptions = !item.isChild && hasPricedChildren(item.number);
+      var mainHasPricedOptions = !isNew && !item.isChild && hasPricedChildren(item.number);
       var payload = {
         productName: document.getElementById('detail-productName').value,
         choiceName: document.getElementById('detail-choiceName') ? document.getElementById('detail-choiceName').value : undefined,
@@ -2125,6 +2205,19 @@
         awaitingShipment: item.isStockTracked === false || hasChildOptions(item.number) ? undefined : Number(document.getElementById('detail-awaiting').value || 0),
         pictureUrl: document.getElementById('detail-pictureUrl').value
       };
+      if (isNew) {
+        if (!String(payload.productName || '').trim()) {
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fa-solid fa-save mr-1"></i>บันทึก';
+          }
+          alert('กรุณากรอกชื่อสินค้า');
+          document.getElementById('detail-productName').focus();
+          return;
+        }
+        saveNewProductDetail(payload, saveBtn);
+        return;
+      }
       google.script.run.withSuccessHandler(function(res) {
         if (res && res.success === false) {
           if (saveBtn) {
@@ -2145,6 +2238,46 @@
       }).updateStockItem(item._row, payload);
     }
 
+    function restoreProductDetailSaveButton(saveBtn) {
+      if (!saveBtn) return;
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-save mr-1"></i>บันทึก';
+    }
+
+    function saveNewProductDetail(payload, saveBtn) {
+      var choices = collectProductChoiceChanges().filter(function(change) {
+        return !change.shouldDelete && change.choiceName;
+      }).map(function(change) {
+        return {
+          choiceName: change.choiceName,
+          price: change.price,
+          stock: change.stock,
+          lowStock: change.lowStock,
+          productCode: change.productCode
+        };
+      });
+      payload.choices = choices;
+      if (choices.length) {
+        payload.stock = 0;
+        payload.awaitingShipment = 0;
+      }
+      function fail(error) {
+        restoreProductDetailSaveButton(saveBtn);
+        alert((error && error.message) || 'เพิ่มสินค้าไม่สำเร็จ');
+      }
+      google.script.run.withSuccessHandler(function(res) {
+        if (!res || res.success === false || res.number === undefined) {
+          fail(new Error((res && res.message) || 'เพิ่มสินค้าไม่สำเร็จ'));
+          return;
+        }
+        restoreProductDetailSaveButton(saveBtn);
+        closeProductDetail();
+        var searchInput = document.getElementById('stock-search-input');
+        if (searchInput) searchInput.value = '';
+        loadStock();
+      }).withFailureHandler(fail).addProduct(payload);
+    }
+
     function collectProductChoiceChanges() {
       var rows = Array.from(document.querySelectorAll('#detail-choices-list .detail-choice-row'));
       return rows.map(function(row) {
@@ -2154,7 +2287,7 @@
           isNew: row.getAttribute('data-new') === 'true',
           shouldDelete: row.getAttribute('data-delete') === 'true',
           choiceName: inputs[0] ? inputs[0].value.trim() : '',
-          price: inputs[1] ? Number(inputs[1].value || 0) : 0,
+          price: inputs[1] && inputs[1].value.trim() !== '' ? Number(inputs[1].value) : '',
           stock: inputs[2] ? Number(inputs[2].value || 0) : 0,
           lowStock: inputs[3] ? Number(inputs[3].value || 0) : 0,
           productCode: inputs[4] ? inputs[4].value.trim() : ''
@@ -2229,14 +2362,6 @@
           loadStock();
         }).deleteProduct(variantId);
       }
-    }
-
-    function openAddProduct() {
-      var name = prompt('ชื่อสินค้าใหม่:');
-      if (!name) return;
-      google.script.run.withSuccessHandler(function() {
-        loadStock();
-      }).addProduct({ name: name, price: 0, stock: 0, lowStock: 3, status: 'มีของ', icon: '📦' });
     }
 
     // ---- Initial Load ----
