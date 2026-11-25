@@ -16,7 +16,7 @@
     }
   </script>
   <script>
-    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbx90N_1Z1WsvTmIr32Ulyaee73pIGZIDbsQp3BvDpg2cPGmHnKJRtS_AAVYEMN26t6N/exec';
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycby0t8FIi6YV9ZoAalxQLrxteuNu83TTU8MWHmhQ58NTx_dKWAj7vFRafuLWZCjFDxgS/exec';
 
     function installGasFetchBridge() {
       if (typeof google !== 'undefined' && google.script && google.script.run) return;
@@ -1170,9 +1170,14 @@
       document.getElementById('order-detail-modal').classList.add('hidden');
     }
 
-    function refreshOrdersAfterAction() {
+    function refreshOrdersAfterAction(result) {
       closeOrderDetailModal();
       loadOrders();
+      if (result && result.success === false) {
+        alert(result.message || 'อัปเดตสถานะไม่สำเร็จ');
+      } else if (result && result.emailWarning) {
+        alert('อัปเดตสถานะแล้ว แต่ส่งอีเมลไม่สำเร็จ: ' + result.emailWarning);
+      }
     }
 
     function renderPhoneLink(phone) {
@@ -1198,7 +1203,13 @@
     function runOrderAction(id, method, confirmText) {
       if (confirmText && !confirm(confirmText)) return;
       setOrderActionLoading(id);
-      google.script.run.withSuccessHandler(refreshOrdersAfterAction)[method](id);
+      google.script.run
+        .withSuccessHandler(refreshOrdersAfterAction)
+        .withFailureHandler(function(error) {
+          closeOrderDetailModal();
+          loadOrders();
+          alert('ทำรายการไม่สำเร็จ: ' + (error && error.message ? error.message : error));
+        })[method](id);
     }
 
     function confirmOrder(id) { runOrderAction(id, 'confirmOrder', 'ยืนยันและตัดสต็อก?'); }
